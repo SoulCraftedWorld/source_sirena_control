@@ -9,7 +9,7 @@
     "logs_dir": "./logs"
   },
   "nmea": {
-    "type": "usb",
+    "type": "udp",
     "usb_device": "/dev/ttyUSB0",
     "usb_baud": 115200,
     "uart_device": "/dev/serial0",
@@ -18,10 +18,10 @@
     "udp_port": 10110
   },
   "siren_trigger": {
+    "mode": "auto",
     "gpio_bcm": 17,
     "pull": "down",
-    "debounce_ms": 10,
-    "mock": false
+    "debounce_ms": 10
   },
   "audio": {
     "enabled": false,

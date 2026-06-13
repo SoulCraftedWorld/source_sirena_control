@@ -29,9 +29,43 @@ LOG_NAME_RE = re.compile(r"^SRC[1-3]_S[A-Za-z0-9_.-]+\.bin$")
 TEST_CATALOG = [
     {"group": "LAB", "id": "LAB-01", "name": "Сирена, тип 1"},
     {"group": "LAB", "id": "LAB-02", "name": "Сирена, тип 2"},
+    {"group": "LAB", "id": "LAB-03", "name": "Сирена, произвольный тип"},
+    {"group": "LAB", "id": "LAB-04", "name": "Калибровка SPL, 2 м"},
+    {"group": "CAL", "id": "CAL-01", "name": "Собственный шум, стоянка"},
+    {"group": "CAL", "id": "CAL-02", "name": "Шум движения без сирены"},
+    {"group": "CAL", "id": "CAL-03", "name": "Ветер и остаточные возмущения"},
+    {"group": "FT-S", "id": "FT-S-FRONT", "name": "Статика, источник спереди"},
+    {"group": "FT-S", "id": "FT-S-REAR", "name": "Статика, источник сзади"},
+    {"group": "FT-S", "id": "FT-S-SIDE", "name": "Статика, источник сбоку"},
+    {"group": "FT-S", "id": "FT-S-DIAG", "name": "Статика, диагональное направление"},
+    {"group": "FT-D", "id": "FT-D1", "name": "Встречное движение"},
+    {"group": "FT-D", "id": "FT-D2", "name": "Эго догоняет источник"},
+    {"group": "FT-D", "id": "FT-D3", "name": "Источник догоняет Эго"},
+    {"group": "FT-D", "id": "FT-D4", "name": "Перекрёсток 90°"},
+    {"group": "FT-D", "id": "FT-D5", "name": "Параллельный проезд"},
     {"group": "FT-D6", "id": "FT-D6.1", "name": "Равномерное движение 50 км/ч"},
-    {"group": "FT-D6", "id": "FT-D6.2", "name": "Плавный разгон 0-80 км/ч"},
-    {"group": "FT-D6", "id": "FT-D6.3", "name": "Торможение 80-0 км/ч"},
+    {"group": "FT-D6", "id": "FT-D6.2", "name": "Плавный разгон 0–80 км/ч"},
+    {"group": "FT-D6", "id": "FT-D6.3", "name": "Торможение 80–0 км/ч"},
+    {"group": "FT-D7", "id": "FT-D7.1", "name": "Попутный автомобиль рядом"},
+    {"group": "FT-D7", "id": "FT-D7.2", "name": "Встречный автомобиль"},
+    {"group": "FT-D7", "id": "FT-D7.3", "name": "Два попутных автомобиля"},
+    {"group": "FT-D8", "id": "FT-D8.1", "name": "Слабый дождь"},
+    {"group": "FT-D8", "id": "FT-D8.2", "name": "Сильный дождь"},
+    {"group": "FT-D8", "id": "FT-D8.3", "name": "Встречный ветер"},
+    {"group": "FT-D8", "id": "FT-D8.4", "name": "Попутный ветер"},
+    {"group": "FT-D8", "id": "FT-D8.5", "name": "После дождя"},
+    {"group": "FT-D9", "id": "FT-D9-A", "name": "Базовая схема микрофонов"},
+    {"group": "FT-D9", "id": "FT-D9-B", "name": "Сокращённая схема микрофонов"},
+    {"group": "FT-Multi", "id": "FT-Multi.02", "name": "Два источника спереди"},
+    {"group": "FT-Multi", "id": "FT-Multi.03", "name": "Источник спереди и сзади"},
+    {"group": "FT-Multi", "id": "FT-Multi.04", "name": "Источники слева и справа"},
+    {"group": "FT-N", "id": "FT-N.01", "name": "Поток без сирены"},
+    {"group": "FT-N", "id": "FT-N.02", "name": "Мотоцикл без сирены"},
+    {"group": "FT-N", "id": "FT-N.04", "name": "Городской гудок"},
+    {"group": "FT-N", "id": "FT-N.05", "name": "Шум мокрой дороги"},
+    {"group": "FT-N", "id": "FT-N.06", "name": "Тоннель или эстакада"},
+    {"group": "FT-N", "id": "FT-N.07", "name": "Городской шум на стоянке"},
+    {"group": "FT-N", "id": "FT-N.08", "name": "Трасса 80 км/ч без сирены"},
     {"group": "CUSTOM", "id": "CUSTOM", "name": "Пользовательское испытание"},
 ]
 
@@ -339,6 +373,20 @@ class SourceApplication:
     def _clean(value: Any, limit: int) -> str:
         return str(value or "").strip()[:limit]
 
+    def session_catalog(self) -> dict[str, Any]:
+        numbers = sorted(
+            {
+                str(item.get("session_number", "")).strip()
+                for item in self.history
+                if str(item.get("session_number", "")).strip()
+            },
+            key=lambda value: (
+                not value.isdigit(),
+                int(value) if value.isdigit() else value,
+            ),
+        )
+        return {"tests": TEST_CATALOG, "session_numbers": numbers}
+
     def start_session(self, raw: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             if self.writer:
@@ -346,22 +394,38 @@ class SourceApplication:
             source_id = int(self.config["source_id"])
             session_number = self._clean(raw.get("session_number"), 24)
             test_id = self._clean(raw.get("test_id"), 32)
-            repeat = max(1, int(raw.get("repeat_number", 1)))
-            if not session_number or not test_id:
-                raise ValueError("session number and test ID are required")
+            known = next(
+                (item for item in TEST_CATALOG if item["id"] == test_id), None
+            )
+            if known is None:
+                raise ValueError("unknown test type")
+            if not session_number:
+                raise ValueError("session number is required")
+            repeat = int(raw.get("repeat_number", 1))
+            if repeat < 1:
+                raise ValueError("repeat number must be positive")
             correlation = f"S{session_number}_{test_id}_R{repeat}"
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
             name = f"SRC{source_id}_{correlation}_{timestamp}.bin"
-            metadata = dict(raw)
-            metadata.update(
-                source_id=source_id,
-                source_name=self.config["source_name"],
-                source_role="siren_source",
-                correlation_key=correlation,
-                repeat_number=repeat,
-                started_utc=utc_now(),
-                log_name=name,
-            )
+            metadata = {
+                "session_number": session_number,
+                "test_group": known["group"],
+                "test_id": test_id,
+                "test_name": self._clean(
+                    raw.get("test_name") or known["name"], 96
+                ),
+                "custom_name": self._clean(raw.get("custom_name"), 96),
+                "repeat_number": repeat,
+                "siren_type": self._clean(raw.get("siren_type"), 48),
+                "operator": self._clean(raw.get("operator"), 64),
+                "comment": self._clean(raw.get("comment"), 320),
+                "source_id": source_id,
+                "source_name": self.config["source_name"],
+                "source_role": "siren_source",
+                "correlation_key": correlation,
+                "started_utc": utc_now(),
+                "log_name": name,
+            }
             writer = EgoLogWriter(self.log_path(name), metadata, self.config)
             self.writer = writer
             self.active = metadata
@@ -435,6 +499,9 @@ class SourceApplication:
             "trigger": {
                 "active": self.trigger.active,
                 "error": self.trigger.error,
+                "warning": self.trigger.warning,
+                "mode": self.trigger.mode,
+                "available": self.trigger.available,
             },
             "audio": {
                 "active": bool(self.audio and self.audio.process),
@@ -562,7 +629,7 @@ class Handler(BaseHTTPRequestHandler):
                     "interfaces": self.app.interfaces_state(),
                 })
             elif parsed.path == "/api/sessions/catalog":
-                self._json({"tests": TEST_CATALOG})
+                self._json(self.app.session_catalog())
             elif parsed.path == "/api/sessions/state":
                 self._json(self.app.session_state())
             elif parsed.path == "/api/uploads/state":

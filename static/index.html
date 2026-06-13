@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Source Sirena</title>
-  <link rel="stylesheet" href="/style.css?v=1">
+  <link rel="stylesheet" href="/style.css?v=2">
 </head>
 <body>
   <header>
@@ -23,21 +23,24 @@
         <section class="panel">
           <div class="heading"><h2>Паспорт испытания</h2><span id="sessionFormState">Готов</span></div>
           <div class="form-grid">
-            <label>Группа<select id="testGroup"></select></label>
-            <label>Сценарий<select id="testId"></select></label>
+            <label>Группа испытаний<select id="testGroup"></select></label>
+            <label>Этап / сценарий<select id="testId"></select></label>
             <label class="wide">Своё название<input id="customName" maxlength="96"></label>
-            <label>Номер сессии<input id="sessionNumber" maxlength="24"></label>
+            <label>Номер сессии
+              <input id="sessionNumber" list="sessionNumbers" maxlength="24">
+              <datalist id="sessionNumbers"></datalist>
+            </label>
             <label>Номер повтора<input id="repeatNumber" type="number" min="1" value="1"></label>
-            <label>Тип сирены<input id="sirenType" maxlength="48"></label>
+            <label>Тип сирены
+              <select id="sirenType">
+                <option value="">Нет / не задан</option>
+                <option>Скорая помощь</option>
+                <option>Пожарная охрана</option>
+                <option>Полиция</option>
+                <option>Другой тип</option>
+              </select>
+            </label>
             <label>Оператор<input id="operator" maxlength="64"></label>
-            <label>Скорость Эго, км/ч<input id="egoSpeed" type="number" step="0.1" value="0"></label>
-            <label>Скорость источника, км/ч<input id="sourceSpeed" type="number" step="0.1" value="0"></label>
-            <label>Дистанция, м<input id="distance" type="number" step="0.1" value="0"></label>
-            <label>Температура, °C<input id="temperature" type="number" step="0.1" value="0"></label>
-            <label>Ветер, м/с<input id="windSpeed" type="number" step="0.1" value="0"></label>
-            <label>Направление ветра, °<input id="windDirection" type="number" step="1" value="0"></label>
-            <label>Осадки<select id="precipitation"><option value="none">Нет</option><option value="rain_light">Слабый дождь</option><option value="rain_heavy">Сильный дождь</option><option value="snow">Снег</option><option value="other">Другие</option></select></label>
-            <label>Покрытие<select id="roadSurface"><option value="dry">Сухое</option><option value="damp">Влажное</option><option value="wet">Мокрое</option><option value="snow">Снег / лёд</option><option value="other">Другое</option></select></label>
             <label class="wide">Комментарий<textarea id="comment" rows="4" maxlength="320"></textarea></label>
           </div>
         </section>
@@ -77,19 +80,22 @@
           <label>UDP bind<input id="udpBind"></label><label>UDP port<input id="udpPort" type="number"></label>
         </fieldset>
         <fieldset><legend>Триггер сирены</legend>
+          <label>Режим<select id="triggerMode"><option value="auto">Auto</option><option value="gpio">GPIO Raspberry Pi</option><option value="mock">Имитация</option></select></label>
           <label>GPIO BCM<input id="gpioPin" type="number"></label><label>Подтяжка<select id="gpioPull"><option value="down">Down</option><option value="none">Нет</option></select></label>
-          <label>Debounce, ms<input id="gpioDebounce" type="number"></label><label>Режим имитации<input id="gpioMock" type="checkbox"></label>
+          <label>Debounce, ms<input id="gpioDebounce" type="number"></label>
           <div class="trigger-display"><i id="triggerLamp"></i><strong id="triggerState">OFF</strong></div>
+          <p id="triggerBackendState" class="muted"></p>
           <div class="actions"><button id="triggerOn">Имитация ON</button><button id="triggerOff">Имитация OFF</button></div>
         </fieldset>
-        <fieldset><legend>Сигнал рупора / аудио</legend>
-          <label>Записывать<input id="audioEnabled" type="checkbox"></label><label>ALSA device<input id="alsaDevice"></label>
+        <fieldset><legend>USB-микрофон</legend>
+          <label>Записывать звук<input id="audioEnabled" type="checkbox"></label><label>ALSA-устройство<input id="alsaDevice" placeholder="hw:1,0"></label>
           <label>Частота<input id="audioRate" type="number"></label><label>Каналы<input id="audioChannels" type="number"></label>
           <label>Формат<input id="audioFormat"></label><label>Байт/отсчёт<input id="audioBytes" type="number"></label><label>Кадров/блок<input id="audioBlock" type="number"></label>
+          <p class="muted">На Raspberry Pi USB-микрофон выбирается по имени ALSA из <code>arecord -l</code>.</p>
         </fieldset>
       </div>
       <section class="panel"><div class="heading"><h2>Текущее навигационное решение</h2><span id="nmeaStatus"></span></div><dl class="status-grid"><div><dt>Позиция</dt><dd id="fixPosition">—</dd></div><div><dt>Высота</dt><dd id="fixAltitude">—</dd></div><div><dt>Скорость</dt><dd id="fixSpeed">—</dd></div><div><dt>Курс</dt><dd id="fixHeading">—</dd></div><div><dt>Спутники</dt><dd id="fixSatellites">—</dd></div><div><dt>Принято / ошибок</dt><dd id="nmeaCounters">0 / 0</dd></div></dl></section>
-      <details><summary>Важное про подключение сигнала рупора</summary><p>GPIO Raspberry Pi не имеет АЦП. Выход усилителя рупора нельзя подключать напрямую. Используйте гальванически развязанный аттенюатор/трансформатор и внешний USB или I2S АЦП; предпочтителен линейный или сервисный выход усилителя.</p></details>
+      <details><summary>Запись звука сирены</summary><p>Используется только акустическая запись через USB-микрофон. Электрический выход усилителя рупора к Raspberry Pi или USB-микрофону не подключается.</p></details>
     </section>
 
     <section id="journal" class="view">
@@ -97,6 +103,6 @@
       <pre id="journalOutput"></pre>
     </section>
   </main>
-  <script src="/app.js?v=1"></script>
+  <script src="/app.js?v=3"></script>
 </body>
 </html>

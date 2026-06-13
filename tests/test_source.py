@@ -5,7 +5,9 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 import zlib
 
 
@@ -13,7 +15,7 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 
 import ego_log
-from inputs import NmeaParser
+from inputs import NmeaParser, NmeaService, TriggerService
 import server
 
 
@@ -89,8 +91,70 @@ class NmeaTests(unittest.TestCase):
         self.assertAlmostEqual(rmc["speed_mps"], 22.4 * 0.514444, places=5)
         self.assertIn("utc_ns", rmc)
 
+    def test_udp_service_starts_without_optional_serial_dependency(self) -> None:
+        service = NmeaService(
+            {"type": "udp", "udp_bind": "127.0.0.1", "udp_port": 0},
+            lambda fix: None,
+        )
+        service.start()
+        try:
+            deadline = time.monotonic() + 1
+            while not service.status["running"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(service.status["running"])
+            self.assertTrue(service.status["available"])
+            self.assertEqual(service.status["error"], "")
+        finally:
+            service.close()
+
+
+class TriggerTests(unittest.TestCase):
+    def test_auto_mode_uses_mock_outside_linux(self) -> None:
+        changes: list[bool] = []
+        service = TriggerService(
+            {"mode": "auto", "gpio_bcm": 17}, changes.append
+        )
+        with mock.patch("inputs.sys.platform", "win32"):
+            service.start()
+        self.assertEqual(service.mode, "mock")
+        self.assertTrue(service.available)
+        self.assertIn("using trigger simulation", service.warning)
+        service.simulate(True)
+        self.assertTrue(service.active)
+        self.assertEqual(changes, [True])
+
+    def test_explicit_gpio_mode_does_not_fallback_to_mock(self) -> None:
+        service = TriggerService(
+            {"mode": "gpio", "gpio_bcm": 17}, lambda active: None
+        )
+        with (
+            mock.patch("inputs.sys.platform", "win32"),
+            mock.patch.dict(sys.modules, {"gpiozero": None}),
+        ):
+            service.start()
+        self.assertNotEqual(service.mode, "mock")
+        self.assertFalse(service.available)
+        self.assertTrue(service.error)
+
 
 class ConfigTests(unittest.TestCase):
+    def test_default_config_is_portable(self) -> None:
+        example = json.loads(
+            (ROOT / "config.example.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(example["nmea"]["type"], "udp")
+        self.assertEqual(example["siren_trigger"]["mode"], "auto")
+
+    def test_test_catalog_matches_ego_scenarios(self) -> None:
+        ids = {item["id"] for item in server.TEST_CATALOG}
+        self.assertEqual(len(server.TEST_CATALOG), 40)
+        self.assertIn("LAB-04", ids)
+        self.assertIn("FT-S-FRONT", ids)
+        self.assertIn("FT-D9-B", ids)
+        self.assertIn("FT-Multi.04", ids)
+        self.assertIn("FT-N.08", ids)
+        self.assertIn("CUSTOM", ids)
+
     def test_source_id_is_limited_to_three_sources(self) -> None:
         example = json.loads(
             (ROOT / "config.example.json").read_text(encoding="utf-8")
@@ -121,16 +185,27 @@ class ConfigTests(unittest.TestCase):
             try:
                 session = app.start_session({
                     "session_number": "5",
-                    "test_group": "FT-D6",
+                    "test_group": "WRONG",
                     "test_id": "FT-D6.1",
-                    "test_name": "Test",
+                    "test_name": "",
                     "repeat_number": 3,
+                    "siren_type": "Полиция",
+                    "ego_speed_kph": 50,
+                    "precipitation_rate_mmh": 1.5,
                 })
                 app.trigger.simulate(True)
                 result = app.stop_session()
                 path = app.log_path(session["log_name"])
                 self.assertTrue(path.is_file())
                 self.assertEqual(result["correlation_key"], "S5_FT-D6.1_R3")
+                self.assertEqual(result["test_group"], "FT-D6")
+                self.assertEqual(
+                    result["test_name"], "Равномерное движение 50 км/ч"
+                )
+                self.assertEqual(result["siren_type"], "Полиция")
+                self.assertNotIn("ego_speed_kph", result)
+                self.assertNotIn("precipitation_rate_mmh", result)
+                self.assertEqual(app.session_catalog()["session_numbers"], ["5"])
                 self.assertFalse(app.session_state()["recording"])
             finally:
                 app.close()
