@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Source Sirena</title>
+  <link rel="stylesheet" href="/style.css?v=1">
+</head>
+<body>
+  <header>
+    <div><h1 id="title">Source Sirena</h1><p id="pageState">Запуск...</p></div>
+    <span id="sourceBadge" class="badge">Source —</span>
+  </header>
+  <nav>
+    <button class="tab active" data-view="sessions">Испытания</button>
+    <button class="tab" data-view="uploads">Загрузки</button>
+    <button class="tab" data-view="interfaces">Интерфейсы</button>
+    <button class="tab" data-view="journal">Журнал</button>
+  </nav>
+  <main>
+    <section id="sessions" class="view active">
+      <div class="session-layout">
+        <section class="panel">
+          <div class="heading"><h2>Паспорт испытания</h2><span id="sessionFormState">Готов</span></div>
+          <div class="form-grid">
+            <label>Группа<select id="testGroup"></select></label>
+            <label>Сценарий<select id="testId"></select></label>
+            <label class="wide">Своё название<input id="customName" maxlength="96"></label>
+            <label>Номер сессии<input id="sessionNumber" maxlength="24"></label>
+            <label>Номер повтора<input id="repeatNumber" type="number" min="1" value="1"></label>
+            <label>Тип сирены<input id="sirenType" maxlength="48"></label>
+            <label>Оператор<input id="operator" maxlength="64"></label>
+            <label>Скорость Эго, км/ч<input id="egoSpeed" type="number" step="0.1" value="0"></label>
+            <label>Скорость источника, км/ч<input id="sourceSpeed" type="number" step="0.1" value="0"></label>
+            <label>Дистанция, м<input id="distance" type="number" step="0.1" value="0"></label>
+            <label>Температура, °C<input id="temperature" type="number" step="0.1" value="0"></label>
+            <label>Ветер, м/с<input id="windSpeed" type="number" step="0.1" value="0"></label>
+            <label>Направление ветра, °<input id="windDirection" type="number" step="1" value="0"></label>
+            <label>Осадки<select id="precipitation"><option value="none">Нет</option><option value="rain_light">Слабый дождь</option><option value="rain_heavy">Сильный дождь</option><option value="snow">Снег</option><option value="other">Другие</option></select></label>
+            <label>Покрытие<select id="roadSurface"><option value="dry">Сухое</option><option value="damp">Влажное</option><option value="wet">Мокрое</option><option value="snow">Снег / лёд</option><option value="other">Другое</option></select></label>
+            <label class="wide">Комментарий<textarea id="comment" rows="4" maxlength="320"></textarea></label>
+          </div>
+        </section>
+        <aside class="session-control">
+          <div id="recordIndicator" class="record-indicator"><i></i><strong id="recordText">Остановлено</strong></div>
+          <div id="timer">00:00:00</div>
+          <div class="actions"><button id="start" class="primary">Старт записи</button><button id="stop" class="danger" disabled>Стоп</button></div>
+          <dl>
+            <div><dt>Файл</dt><dd id="activeFile">—</dd></div>
+            <div><dt>Размер</dt><dd id="activeSize">0 B</dd></div>
+            <div><dt>Триггер сирены</dt><dd id="activeTrigger">OFF</dd></div>
+            <div><dt>NMEA</dt><dd id="activeNmea">—</dd></div>
+            <div><dt>Аудиоблоки</dt><dd id="activeAudio">0</dd></div>
+          </dl>
+        </aside>
+      </div>
+      <section class="panel history"><div class="heading"><h2>Последние сессии</h2></div><div class="table-wrap"><table><thead><tr><th>Source</th><th>№</th><th>Сценарий</th><th>Повтор</th><th>Начало UTC</th><th>Статус</th><th>Файл</th></tr></thead><tbody id="history"></tbody></table></div></section>
+    </section>
+
+    <section id="uploads" class="view">
+      <div class="toolbar"><button id="uploadsRefresh">Обновить</button><button id="s3Save" class="primary">Применить S3</button><button id="s3Test">Проверить S3</button><span id="uploadsState"></span></div>
+      <div class="settings-grid">
+        <fieldset><legend>S3</legend><label>Endpoint<input id="s3Endpoint"></label><label>Bucket<input id="s3Bucket"></label><label>Region<input id="s3Region"></label><label>Prefix<input id="s3Prefix"></label></fieldset>
+        <fieldset><legend>Доступ</legend><label>Access key<input id="s3Access"></label><label>Secret key<input id="s3Secret" type="password"></label><label>Session token<input id="s3Token" type="password"></label><label>Автозагрузка<input id="s3Auto" type="checkbox"></label></fieldset>
+        <fieldset><legend>Хранилище</legend><label>Каталог логов<input id="logsDir"></label><button id="logsDirSave">Изменить каталог</button><p>Свободно: <span id="localFree">—</span></p></fieldset>
+      </div>
+      <section class="panel"><div class="heading"><h2>Локальные бинарные логи</h2></div><div class="table-wrap"><table><thead><tr><th>Файл</th><th>Размер</th><th>UTC</th><th>Статус</th><th>Прогресс</th><th>Ошибка</th><th>Действия</th></tr></thead><tbody id="logs"></tbody></table></div></section>
+    </section>
+
+    <section id="interfaces" class="view">
+      <div class="toolbar"><button id="interfacesRefresh">Обновить</button><button id="interfacesSave" class="primary">Применить интерфейсы</button><span id="interfacesState"></span></div>
+      <div class="settings-grid">
+        <fieldset><legend>NMEA</legend>
+          <label>Источник<select id="nmeaType"><option value="disabled">Отключён</option><option value="usb">USB serial</option><option value="uart">UART</option><option value="udp">LAN UDP</option></select></label>
+          <label>USB устройство<input id="usbDevice"></label><label>USB baud<input id="usbBaud" type="number"></label>
+          <label>UART устройство<input id="uartDevice"></label><label>UART baud<input id="uartBaud" type="number"></label>
+          <label>UDP bind<input id="udpBind"></label><label>UDP port<input id="udpPort" type="number"></label>
+        </fieldset>
+        <fieldset><legend>Триггер сирены</legend>
+          <label>GPIO BCM<input id="gpioPin" type="number"></label><label>Подтяжка<select id="gpioPull"><option value="down">Down</option><option value="none">Нет</option></select></label>
+          <label>Debounce, ms<input id="gpioDebounce" type="number"></label><label>Режим имитации<input id="gpioMock" type="checkbox"></label>
+          <div class="trigger-display"><i id="triggerLamp"></i><strong id="triggerState">OFF</strong></div>
+          <div class="actions"><button id="triggerOn">Имитация ON</button><button id="triggerOff">Имитация OFF</button></div>
+        </fieldset>
+        <fieldset><legend>Сигнал рупора / аудио</legend>
+          <label>Записывать<input id="audioEnabled" type="checkbox"></label><label>ALSA device<input id="alsaDevice"></label>
+          <label>Частота<input id="audioRate" type="number"></label><label>Каналы<input id="audioChannels" type="number"></label>
+          <label>Формат<input id="audioFormat"></label><label>Байт/отсчёт<input id="audioBytes" type="number"></label><label>Кадров/блок<input id="audioBlock" type="number"></label>
+        </fieldset>
+      </div>
+      <section class="panel"><div class="heading"><h2>Текущее навигационное решение</h2><span id="nmeaStatus"></span></div><dl class="status-grid"><div><dt>Позиция</dt><dd id="fixPosition">—</dd></div><div><dt>Высота</dt><dd id="fixAltitude">—</dd></div><div><dt>Скорость</dt><dd id="fixSpeed">—</dd></div><div><dt>Курс</dt><dd id="fixHeading">—</dd></div><div><dt>Спутники</dt><dd id="fixSatellites">—</dd></div><div><dt>Принято / ошибок</dt><dd id="nmeaCounters">0 / 0</dd></div></dl></section>
+      <details><summary>Важное про подключение сигнала рупора</summary><p>GPIO Raspberry Pi не имеет АЦП. Выход усилителя рупора нельзя подключать напрямую. Используйте гальванически развязанный аттенюатор/трансформатор и внешний USB или I2S АЦП; предпочтителен линейный или сервисный выход усилителя.</p></details>
+    </section>
+
+    <section id="journal" class="view">
+      <div class="toolbar"><button id="journalRefresh">Обновить</button><button id="journalCopy">Копировать</button><button id="journalClear">Очистить окно</button><label class="inline"><input id="journalAuto" type="checkbox" checked>Автообновление</label></div>
+      <pre id="journalOutput"></pre>
+    </section>
+  </main>
+  <script src="/app.js?v=1"></script>
+</body>
+</html>

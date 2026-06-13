@@ -1,0 +1,43 @@
+{
+  "source_id": 1,
+  "source_name": "Source 1",
+  "web": {
+    "bind": "0.0.0.0",
+    "port": 8084
+  },
+  "storage": {
+    "logs_dir": "./logs"
+  },
+  "nmea": {
+    "type": "usb",
+    "usb_device": "/dev/ttyUSB0",
+    "usb_baud": 115200,
+    "uart_device": "/dev/serial0",
+    "uart_baud": 115200,
+    "udp_bind": "0.0.0.0",
+    "udp_port": 10110
+  },
+  "siren_trigger": {
+    "gpio_bcm": 17,
+    "pull": "down",
+    "debounce_ms": 10,
+    "mock": false
+  },
+  "audio": {
+    "enabled": false,
+    "alsa_device": "hw:1,0",
+    "sample_rate_hz": 48000,
+    "channels": 1,
+    "sample_format": "S32_LE",
+    "bytes_per_sample": 4,
+    "block_frames": 1024
+  },
+  "s3": {
+    "endpoint_url": "",
+    "bucket": "",
+    "region": "us-east-1",
+    "access_key_id": "",
+    "prefix": "source-sirena",
+    "auto_upload": false
+  }
+}

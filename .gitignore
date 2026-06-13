@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+config.json
+session_history.json
+storage_settings.json
+logs/*
+!logs/.gitkeep
+.venv/

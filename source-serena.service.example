@@ -1,0 +1,19 @@
+[Unit]
+Description=Source Sirena test logger
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+SupplementaryGroups=dialout gpio audio
+WorkingDirectory=/opt/sam-audio-starter-mod/tools/source_sirena
+ExecStart=/opt/sam-audio-starter-mod/tools/source_sirena/.venv/bin/python server.py
+Restart=on-failure
+RestartSec=2
+# Environment=SOURCE_SIRENA_S3_SECRET_ACCESS_KEY=replace-me
+# Environment=SOURCE_SIRENA_S3_SESSION_TOKEN=
+
+[Install]
+WantedBy=multi-user.target
