@@ -12,6 +12,7 @@ from pathlib import Path
 import queue
 import re
 import shutil
+import socket
 import threading
 import time
 from typing import Any
@@ -295,6 +296,131 @@ class S3Uploader:
             return dict(self.records.get(name, {}))
 
 
+class LocalPcSender:
+    def __init__(self, app: "SourceApplication") -> None:
+        self.app = app
+        self.queue: queue.Queue[str] = queue.Queue()
+        self.queued: set[str] = set()
+        self.records: dict[str, dict[str, Any]] = {}
+        self.lock = threading.RLock()
+        self.stop_event = threading.Event()
+        self.worker = threading.Thread(
+            target=self._run, name="source-localpc", daemon=True
+        )
+        self.worker.start()
+
+    def settings(self) -> dict[str, Any]:
+        return dict(self.app.config.get("localpc", {}))
+
+    def enqueue(self, name: str) -> None:
+        self.app.log_path(name)
+        if not self.settings().get("enabled", False):
+            return
+        with self.lock:
+            if name in self.queued:
+                return
+            self.queued.add(name)
+            self.records[name] = {
+                "status": "queued",
+                "progress_bytes": 0,
+                "error": "",
+            }
+        self.queue.put(name)
+
+    def record(self, name: str) -> dict[str, Any]:
+        with self.lock:
+            return dict(self.records.get(name, {}))
+
+    def _run(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                name = self.queue.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            try:
+                self._send_with_retry(name)
+            finally:
+                with self.lock:
+                    self.queued.discard(name)
+                self.queue.task_done()
+
+    def _send_with_retry(self, name: str) -> None:
+        settings = self.settings()
+        deadline = time.monotonic() + float(settings.get("retry_window_s", 20.0))
+        interval = max(0.2, float(settings.get("retry_interval_s", 2.0)))
+        last_error = ""
+        while not self.stop_event.is_set():
+            try:
+                self._send_once(name, settings)
+                with self.lock:
+                    self.records[name].update(status="sent", error="")
+                logging.info("LocalPC push completed for %s", name)
+                return
+            except Exception as exc:
+                last_error = str(exc)
+                with self.lock:
+                    self.records[name].update(status="retrying", error=last_error)
+                logging.warning("LocalPC push failed for %s: %s", name, exc)
+                if time.monotonic() + interval > deadline:
+                    break
+                self.stop_event.wait(interval)
+        with self.lock:
+            self.records[name].update(status="error", error=last_error)
+
+    def _send_once(self, name: str, settings: dict[str, Any]) -> None:
+        path = self.app.log_path(name)
+        size = path.stat().st_size
+        host = str(settings.get("host", ""))
+        port = int(settings.get("port", 10201))
+        if not host:
+            raise RuntimeError("LocalPC host is not configured")
+        timeout = float(settings.get("connect_timeout_s", 3.0))
+        correlation_key = ""
+        for item in reversed(self.app.history):
+            if item.get("log_name") == name:
+                correlation_key = str(item.get("correlation_key", ""))
+                break
+        header = {
+            "protocol": "ego-source-log/1",
+            "name": name,
+            "size": size,
+            "source_id": int(self.app.config["source_id"]),
+            "source_name": self.app.config["source_name"],
+            "correlation_key": correlation_key,
+        }
+        with self.lock:
+            self.records[name].update(
+                status="sending",
+                progress_bytes=0,
+                error="",
+            )
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(
+                json.dumps(header, ensure_ascii=False).encode("utf-8") + b"\n"
+            )
+            sent = 0
+            with path.open("rb") as input_file:
+                while True:
+                    chunk = input_file.read(1024 * 256)
+                    if not chunk:
+                        break
+                    sock.sendall(chunk)
+                    sent += len(chunk)
+                    with self.lock:
+                        self.records[name]["progress_bytes"] = sent
+            response = sock.recv(256)
+        if not response.startswith(b"OK "):
+            raise RuntimeError(
+                response.decode("utf-8", errors="replace").strip()
+                or "LocalPC receiver rejected log"
+            )
+
+    def close(self) -> None:
+        self.stop_event.set()
+        self.worker.join(timeout=2.0)
+
+
 class SourceApplication:
     def __init__(self, config_path: Path) -> None:
         self.config_path = config_path
@@ -307,6 +433,7 @@ class SourceApplication:
         self.audio: AudioCapture | None = None
         self.history = self._load_history()
         self.uploader = S3Uploader(self)
+        self.localpc = LocalPcSender(self)
         self.nmea: NmeaService
         self.trigger: TriggerService
         self._start_inputs()
@@ -467,6 +594,7 @@ class SourceApplication:
                     break
             self._save_history()
             logging.info("Session stopped: %s", name)
+            self.localpc.enqueue(name)
             if self.config["s3"].get("auto_upload"):
                 self.uploader.enqueue(name)
             return dict(metadata)
@@ -541,7 +669,9 @@ class SourceApplication:
                 "modified_utc": datetime.fromtimestamp(
                     stat.st_mtime, timezone.utc
                 ).isoformat(),
-            } | self.uploader.record(path.name))
+            } | self.uploader.record(path.name) | {
+                "localpc": self.localpc.record(path.name)
+            })
         return {
             "logs": logs,
             "local_dir": str(self.logs_dir),
@@ -570,6 +700,7 @@ class SourceApplication:
     def close(self) -> None:
         if self.writer:
             self.stop_session()
+        self.localpc.close()
         self._stop_inputs()
 
 

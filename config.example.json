@@ -39,5 +39,13 @@
     "access_key_id": "",
     "prefix": "source-sirena",
     "auto_upload": false
+  },
+  "localpc": {
+    "enabled": false,
+    "host": "192.168.8.11",
+    "port": 10201,
+    "connect_timeout_s": 3.0,
+    "retry_window_s": 20.0,
+    "retry_interval_s": 2.0
   }
 }

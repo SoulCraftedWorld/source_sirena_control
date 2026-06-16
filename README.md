@@ -150,6 +150,28 @@ sudo systemctl enable --now source-serena
 sudo journalctl -u source-serena -f
 ```
 
+## Отправка лога в LocalPC
+
+После Stop приложение может отправлять готовый `.bin` в LocalPC по TCP. LocalPC
+слушает `source_log_receiver.py` на порту `10201`, принимает JSON header первой
+строкой и затем сырые байты файла.
+
+Минимальный блок в `config.json`:
+
+```json
+"localpc": {
+  "enabled": true,
+  "host": "192.168.8.11",
+  "port": 10201,
+  "connect_timeout_s": 3.0,
+  "retry_window_s": 20.0,
+  "retry_interval_s": 2.0
+}
+```
+
+Если LocalPC временно недоступен, Source Sirena повторяет попытки в пределах
+`retry_window_s`. Остановка записи при этом не блокируется.
+
 ## Проверки
 
 ```bash

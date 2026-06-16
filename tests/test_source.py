@@ -6,6 +6,7 @@ import socket
 import struct
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -239,6 +240,73 @@ class ConfigTests(unittest.TestCase):
             finally:
                 app.close()
                 server.HISTORY_PATH = previous_history
+
+    def test_completed_session_is_pushed_to_localpc_tcp(self) -> None:
+        example = json.loads(
+            (ROOT / "config.example.json").read_text(encoding="utf-8")
+        )
+        received: dict[str, object] = {}
+        ready = threading.Event()
+        done = threading.Event()
+
+        def tcp_receiver(listener: socket.socket) -> None:
+            listener.listen(1)
+            ready.set()
+            conn, _ = listener.accept()
+            with conn, conn.makefile("rb") as stream:
+                header = json.loads(stream.readline().decode("utf-8"))
+                payload = stream.read(int(header["size"]))
+                received["header"] = header
+                received["payload_size"] = len(payload)
+                conn.sendall(b"OK stored\n")
+            done.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+            thread = threading.Thread(
+                target=tcp_receiver, args=(listener,), daemon=True
+            )
+            thread.start()
+            self.assertTrue(ready.wait(1.0))
+
+            example["source_id"] = 2
+            example["storage"]["logs_dir"] = str(root / "logs")
+            example["nmea"]["type"] = "disabled"
+            example["siren_trigger"]["mock"] = True
+            example["audio"]["enabled"] = False
+            example["localpc"].update(
+                {
+                    "enabled": True,
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "retry_window_s": 2.0,
+                    "retry_interval_s": 0.1,
+                }
+            )
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(example), encoding="utf-8")
+            previous_history = server.HISTORY_PATH
+            server.HISTORY_PATH = root / "history.json"
+            app = server.SourceApplication(config_path)
+            try:
+                session = app.start_session({
+                    "session_number": "5",
+                    "test_id": "FT-D6.1",
+                    "repeat_number": 3,
+                })
+                app.stop_session()
+                self.assertTrue(done.wait(2.0))
+                header = received["header"]
+                self.assertEqual(header["name"], session["log_name"])
+                self.assertEqual(header["correlation_key"], "S5_FT-D6.1_R3")
+                self.assertGreater(received["payload_size"], 0)
+            finally:
+                app.close()
+                server.HISTORY_PATH = previous_history
+                listener.close()
 
 
 if __name__ == "__main__":
