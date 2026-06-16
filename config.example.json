@@ -9,13 +9,13 @@
     "logs_dir": "./logs"
   },
   "nmea": {
-    "type": "udp",
+    "type": "tcp",
     "usb_device": "/dev/ttyUSB0",
     "usb_baud": 115200,
     "uart_device": "/dev/serial0",
     "uart_baud": 115200,
-    "udp_bind": "0.0.0.0",
-    "udp_port": 10110
+    "tcp_bind": "0.0.0.0",
+    "tcp_port": 10110
   },
   "siren_trigger": {
     "mode": "auto",

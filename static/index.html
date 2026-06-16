@@ -74,10 +74,10 @@
       <div class="toolbar"><button id="interfacesRefresh">Обновить</button><button id="interfacesSave" class="primary">Применить интерфейсы</button><span id="interfacesState"></span></div>
       <div class="settings-grid">
         <fieldset><legend>NMEA</legend>
-          <label>Источник<select id="nmeaType"><option value="disabled">Отключён</option><option value="usb">USB serial</option><option value="uart">UART</option><option value="udp">LAN UDP</option></select></label>
+          <label>Источник<select id="nmeaType"><option value="disabled">Отключён</option><option value="usb">USB serial</option><option value="uart">UART</option><option value="tcp">LAN TCP</option></select></label>
           <label>USB устройство<input id="usbDevice"></label><label>USB baud<input id="usbBaud" type="number"></label>
           <label>UART устройство<input id="uartDevice"></label><label>UART baud<input id="uartBaud" type="number"></label>
-          <label>UDP bind<input id="udpBind"></label><label>UDP port<input id="udpPort" type="number"></label>
+          <label>TCP bind<input id="tcpBind"></label><label>TCP port<input id="tcpPort" type="number"></label>
         </fieldset>
         <fieldset><legend>Триггер сирены</legend>
           <label>Режим<select id="triggerMode"><option value="auto">Auto</option><option value="gpio">GPIO Raspberry Pi</option><option value="mock">Имитация</option></select></label>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import socket
 import struct
 import sys
 import tempfile
@@ -91,9 +92,9 @@ class NmeaTests(unittest.TestCase):
         self.assertAlmostEqual(rmc["speed_mps"], 22.4 * 0.514444, places=5)
         self.assertIn("utc_ns", rmc)
 
-    def test_udp_service_starts_without_optional_serial_dependency(self) -> None:
+    def test_tcp_service_accepts_nmea_without_optional_serial_dependency(self) -> None:
         service = NmeaService(
-            {"type": "udp", "udp_bind": "127.0.0.1", "udp_port": 0},
+            {"type": "tcp", "tcp_bind": "127.0.0.1", "tcp_port": 0},
             lambda fix: None,
         )
         service.start()
@@ -104,6 +105,34 @@ class NmeaTests(unittest.TestCase):
             self.assertTrue(service.status["running"])
             self.assertTrue(service.status["available"])
             self.assertEqual(service.status["error"], "")
+        finally:
+            service.close()
+
+    def test_tcp_service_parses_received_nmea(self) -> None:
+        fixes: list[dict[str, object]] = []
+        service = NmeaService(
+            {"type": "tcp", "tcp_bind": "127.0.0.1", "tcp_port": 0},
+            fixes.append,
+        )
+        service.start()
+        try:
+            deadline = time.monotonic() + 1
+            while not service.status["running"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            port = int(str(service.status["listen"]).rsplit(":", 1)[1])
+            with socket.create_connection(("127.0.0.1", port), timeout=1) as client:
+                client.sendall(
+                    b"$GPGGA,123519,4807.038,N,01131.000,E,4,08,0.9,"
+                    b"545.4,M,46.9,M,,*42\r\n"
+                )
+            deadline = time.monotonic() + 1
+            while not fixes and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(service.status["valid"], 1)
+            self.assertEqual(service.status["errors"], 0)
+            self.assertAlmostEqual(
+                float(fixes[0]["latitude_deg"]), 48.1173, places=4
+            )
         finally:
             service.close()
 
@@ -142,7 +171,7 @@ class ConfigTests(unittest.TestCase):
         example = json.loads(
             (ROOT / "config.example.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(example["nmea"]["type"], "udp")
+        self.assertEqual(example["nmea"]["type"], "tcp")
         self.assertEqual(example["siren_trigger"]["mode"], "auto")
 
     def test_test_catalog_matches_ego_scenarios(self) -> None:

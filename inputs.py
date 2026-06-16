@@ -107,6 +107,7 @@ class NmeaService:
         self.status = {
             "running": False, "sentences": 0, "valid": 0, "errors": 0,
             "bytes": 0, "last_fix": None, "error": "", "available": False,
+            "connected": False, "peer": "", "listen": "",
         }
 
     def start(self) -> None:
@@ -145,6 +146,8 @@ class NmeaService:
                 return
             if kind == "udp":
                 self._run_udp()
+            elif kind == "tcp":
+                self._run_tcp()
             elif kind in {"usb", "uart"}:
                 self._run_serial(kind)
             else:
@@ -175,13 +178,66 @@ class NmeaService:
                 except socket.timeout:
                     continue
 
+    def _run_tcp(self) -> None:
+        bind = str(
+            self.config.get("tcp_bind", self.config.get("udp_bind", "0.0.0.0"))
+        )
+        port = int(self.config.get("tcp_port", self.config.get("udp_port", 10110)))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(1.0)
+        sock.bind((bind, port))
+        sock.listen(1)
+        actual_host, actual_port = sock.getsockname()[:2]
+        self.status["listen"] = f"{actual_host}:{actual_port}"
+        self.status["available"] = True
+        self.status["running"] = True
+        with sock:
+            while not self.stop_event.is_set():
+                try:
+                    conn, addr = sock.accept()
+                except socket.timeout:
+                    continue
+                self._handle_tcp_client(conn, addr)
+
+    def _handle_tcp_client(
+        self, conn: socket.socket, addr: tuple[str, int]
+    ) -> None:
+        peer = f"{addr[0]}:{addr[1]}"
+        self.status["connected"] = True
+        self.status["peer"] = peer
+        buffer = bytearray()
+        with conn:
+            conn.settimeout(1.0)
+            while not self.stop_event.is_set():
+                try:
+                    chunk = conn.recv(4096)
+                except socket.timeout:
+                    continue
+                except OSError as exc:
+                    self.status["error"] = f"NMEA TCP receive failed: {exc}"
+                    break
+                if not chunk:
+                    break
+                buffer.extend(chunk)
+                while b"\n" in buffer:
+                    line, _, rest = buffer.partition(b"\n")
+                    buffer = bytearray(rest)
+                    if line:
+                        self._accept(bytes(line.rstrip(b"\r")) + b"\n")
+                if len(buffer) > 8192:
+                    self.status["errors"] += 1
+                    buffer.clear()
+        self.status["connected"] = False
+        self.status["peer"] = ""
+
     def _run_serial(self, kind: str) -> None:
         try:
             import serial
         except ImportError as exc:
             raise InputUnavailableError(
                 "pyserial is required for USB/UART NMEA; "
-                "install requirements.txt or select UDP/disabled"
+                "install requirements.txt or select TCP/disabled"
             ) from exc
         device = self.config[f"{kind}_device"]
         baud = int(self.config.get(f"{kind}_baud", 115200))
