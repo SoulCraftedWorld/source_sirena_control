@@ -38,8 +38,8 @@ SRC<source_id>_S<session>_<test_id>_R<repeat>_<UTC>.bin
 
 - `SESSION_STARTED` / `SESSION_ENDED` — паспорт;
 - `CONFIG_SNAPSHOT` — конфигурация Source;
-- `GPS_FIX` — разобранные NMEA GGA/RMC;
-- `TIME_STATUS` — связь monotonic time Raspberry Pi с UTC из RMC;
+- `GPS_FIX` — разобранные NMEA GGA/RMC/GSA/GST/VTG/ZDA;
+- `TIME_STATUS` — связь monotonic time Raspberry Pi с UTC из RMC/ZDA;
 - `MARKER_EVENT` — JSON изменения входа сирены;
 - `AUDIO_BLOCK` — PCM от USB-микрофона через ALSA.
 
@@ -88,10 +88,12 @@ python server.py --bind 127.0.0.1 --port 8085
 - USB serial: например `/dev/ttyUSB0` или стабильный путь
   `/dev/serial/by-id/...`;
 - UART: обычно `/dev/serial0`;
-- LAN TCP: bind-адрес и порт. Source Sirena слушает порт, NMEA-источник подключается к нему клиентом и передаёт строки GGA/RMC.
+- LAN TCP: bind-адрес и порт. Source Sirena слушает порт, NMEA-источник подключается к нему клиентом и передаёт строки GGA/RMC/GSA/GST/VTG/ZDA.
 
-Распознаются GGA и RMC с проверкой checksum. Сырые предложения учитываются
-счётчиками; в лог пишется нормализованный `GPS_FIX`.
+Распознаются GGA, RMC, GSA, GST, VTG и ZDA с проверкой checksum. Сырые
+предложения учитываются счётчиками; в лог пишется нормализованный `GPS_FIX`
+с UTC, координатами, высотой, типом решения, спутниками, HDOP/PDOP/VDOP,
+age/base station, скоростью, курсом и ошибками GST.
 
 ## Вход включения сирены
 

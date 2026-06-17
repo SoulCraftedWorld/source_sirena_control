@@ -38,16 +38,45 @@ def _coordinate(value: str, hemisphere: str) -> float:
     return -result if hemisphere in {"S", "W"} else result
 
 
+GPS_NMEA_FLAG_UTC_TIME_VALID = 1 << 0
+GPS_NMEA_FLAG_POSITION_VALID = 1 << 1
+GPS_NMEA_FLAG_ALTITUDE_VALID = 1 << 2
+GPS_NMEA_FLAG_HDOP_VALID = 1 << 3
+GPS_NMEA_FLAG_PDOP_VALID = 1 << 4
+GPS_NMEA_FLAG_VDOP_VALID = 1 << 5
+GPS_NMEA_FLAG_AGE_DIFF_VALID = 1 << 6
+GPS_NMEA_FLAG_BASE_STATION_VALID = 1 << 7
+GPS_NMEA_FLAG_SPEED_VALID = 1 << 8
+GPS_NMEA_FLAG_HEADING_VALID = 1 << 9
+GPS_NMEA_FLAG_GST_LAT_VALID = 1 << 10
+GPS_NMEA_FLAG_GST_LON_VALID = 1 << 11
+GPS_NMEA_FLAG_GST_ALT_VALID = 1 << 12
+GPS_NMEA_FLAG_GST_RMS_VALID = 1 << 13
+GPS_NMEA_FLAG_ZDA_TIME_USED = 1 << 14
+
+
+def _float(value: str, default: float = 0.0) -> float:
+    return float(value) if value else default
+
+
+def _int(value: str, default: int = 0) -> int:
+    return int(value) if value else default
+
+
 class NmeaParser:
     def __init__(self) -> None:
         self._last: dict[str, Any] = {}
         self._utc_date: tuple[int, int, int] | None = None
 
+    def _set_flag(self, flag: int) -> None:
+        self._last["nmea_flags"] = int(self._last.get("nmea_flags", 0)) | flag
+
     def _accept_utc(self, time_text: str, date_text: str = "") -> None:
         if date_text and len(date_text) >= 6:
+            year_value = int(date_text[4:6])
             day, month, year = (
                 int(date_text[0:2]), int(date_text[2:4]),
-                2000 + int(date_text[4:6]),
+                1900 + year_value if year_value >= 80 else 2000 + year_value,
             )
             self._utc_date = (year, month, day)
         if self._utc_date is None or len(time_text) < 6:
@@ -58,41 +87,127 @@ class NmeaParser:
             *self._utc_date, hour, minute, tzinfo=timezone.utc
         ) + timedelta(seconds=second_value)
         self._last["utc_ns"] = int(value.timestamp() * 1_000_000_000)
+        self._set_flag(GPS_NMEA_FLAG_UTC_TIME_VALID)
+
+    def _accept_zda_utc(
+        self, time_text: str, day_text: str, month_text: str, year_text: str
+    ) -> None:
+        if not time_text or not day_text or not month_text or not year_text:
+            return
+        self._utc_date = (int(year_text), int(month_text), int(day_text))
+        self._accept_utc(time_text)
+        self._set_flag(GPS_NMEA_FLAG_ZDA_TIME_USED)
+
+    def _publish(self) -> dict[str, Any]:
+        self._last["t_ns"] = time.monotonic_ns()
+        self._last["received_utc"] = datetime.now(timezone.utc).isoformat()
+        return dict(self._last)
 
     def ingest(self, sentence: str) -> dict[str, Any] | None:
         if not _nmea_checksum_valid(sentence):
             return None
         fields = sentence.strip()[1:].split("*", 1)[0].split(",")
         kind = fields[0][-3:]
-        if kind == "RMC" and len(fields) >= 10:
-            valid = fields[2] == "A"
-            self._accept_utc(fields[1], fields[9])
-            self._last.update(
-                latitude_deg=_coordinate(fields[3], fields[4]),
-                longitude_deg=_coordinate(fields[5], fields[6]),
-                speed_mps=float(fields[7] or 0.0) * 0.514444,
-                heading_rad=math.radians(float(fields[8] or 0.0)),
-                fix_type=1 if valid else 0,
-                utc_text=f"{fields[9]} {fields[1]}",
-            )
-        elif kind == "GGA" and len(fields) >= 10:
-            self._accept_utc(fields[1])
-            quality = int(fields[6] or 0)
-            rtk = 2 if quality == 4 else 1 if quality == 5 else 0
-            self._last.update(
-                latitude_deg=_coordinate(fields[2], fields[3]),
-                longitude_deg=_coordinate(fields[4], fields[5]),
-                altitude_m=float(fields[9] or 0.0),
-                satellites=int(fields[7] or 0),
-                h_accuracy_m=float(fields[8] or 0.0),
-                fix_type=quality,
-                rtk_status=rtk,
-            )
-        else:
+        try:
+            if kind == "RMC" and len(fields) >= 10:
+                valid = fields[2] == "A"
+                self._accept_utc(fields[1], fields[9])
+                if valid and fields[3] and fields[5]:
+                    self._last.update(
+                        latitude_deg=_coordinate(fields[3], fields[4]),
+                        longitude_deg=_coordinate(fields[5], fields[6]),
+                    )
+                    self._set_flag(GPS_NMEA_FLAG_POSITION_VALID)
+                if fields[7]:
+                    self._last["speed_mps"] = _float(fields[7]) * 0.514444
+                    self._set_flag(GPS_NMEA_FLAG_SPEED_VALID)
+                if fields[8]:
+                    self._last["heading_rad"] = math.radians(_float(fields[8]))
+                    self._set_flag(GPS_NMEA_FLAG_HEADING_VALID)
+                self._last.update(
+                    fix_type=1 if valid else 0,
+                    utc_text=f"{fields[9]} {fields[1]}",
+                )
+            elif kind == "GGA" and len(fields) >= 10:
+                self._accept_utc(fields[1])
+                quality = _int(fields[6])
+                rtk = 2 if quality == 4 else 1 if quality == 5 else 0
+                if fields[2] and fields[4]:
+                    self._last.update(
+                        latitude_deg=_coordinate(fields[2], fields[3]),
+                        longitude_deg=_coordinate(fields[4], fields[5]),
+                    )
+                    self._set_flag(GPS_NMEA_FLAG_POSITION_VALID)
+                if fields[9]:
+                    self._last["altitude_m"] = _float(fields[9])
+                    self._set_flag(GPS_NMEA_FLAG_ALTITUDE_VALID)
+                if fields[8]:
+                    hdop = _float(fields[8])
+                    self._last["hdop"] = hdop
+                    self._last["h_accuracy_m"] = hdop
+                    self._set_flag(GPS_NMEA_FLAG_HDOP_VALID)
+                if len(fields) > 13 and fields[13]:
+                    self._last["age_of_diff_s"] = _float(fields[13])
+                    self._set_flag(GPS_NMEA_FLAG_AGE_DIFF_VALID)
+                if len(fields) > 14 and fields[14]:
+                    self._last["base_station_id"] = _int(fields[14])
+                    self._set_flag(GPS_NMEA_FLAG_BASE_STATION_VALID)
+                self._last.update(
+                    satellites=_int(fields[7]),
+                    fix_type=quality,
+                    rtk_status=rtk,
+                )
+            elif kind == "GSA" and len(fields) >= 18:
+                fix_mode = _int(fields[2])
+                if fix_mode:
+                    self._last["fix_type"] = fix_mode
+                if fields[15]:
+                    self._last["pdop"] = _float(fields[15])
+                    self._set_flag(GPS_NMEA_FLAG_PDOP_VALID)
+                if fields[16]:
+                    hdop = _float(fields[16])
+                    self._last["hdop"] = hdop
+                    self._last["h_accuracy_m"] = hdop
+                    self._set_flag(GPS_NMEA_FLAG_HDOP_VALID)
+                if fields[17]:
+                    self._last["vdop"] = _float(fields[17])
+                    self._last["v_accuracy_m"] = _float(fields[17])
+                    self._set_flag(GPS_NMEA_FLAG_VDOP_VALID)
+            elif kind == "GST" and len(fields) >= 9:
+                self._accept_utc(fields[1])
+                if fields[2]:
+                    self._last["gst_rms_error_m"] = _float(fields[2])
+                    self._set_flag(GPS_NMEA_FLAG_GST_RMS_VALID)
+                if fields[6]:
+                    value = _float(fields[6])
+                    self._last["gst_latitude_error_m"] = value
+                    self._last["h_accuracy_m"] = value
+                    self._set_flag(GPS_NMEA_FLAG_GST_LAT_VALID)
+                if fields[7]:
+                    self._last["gst_longitude_error_m"] = _float(fields[7])
+                    self._set_flag(GPS_NMEA_FLAG_GST_LON_VALID)
+                if fields[8]:
+                    value = _float(fields[8])
+                    self._last["gst_altitude_error_m"] = value
+                    self._last["v_accuracy_m"] = value
+                    self._set_flag(GPS_NMEA_FLAG_GST_ALT_VALID)
+            elif kind == "VTG" and len(fields) >= 8:
+                if fields[1]:
+                    self._last["heading_rad"] = math.radians(_float(fields[1]))
+                    self._set_flag(GPS_NMEA_FLAG_HEADING_VALID)
+                if fields[7]:
+                    self._last["speed_mps"] = _float(fields[7]) / 3.6
+                    self._set_flag(GPS_NMEA_FLAG_SPEED_VALID)
+                elif len(fields) > 5 and fields[5]:
+                    self._last["speed_mps"] = _float(fields[5]) * 0.514444
+                    self._set_flag(GPS_NMEA_FLAG_SPEED_VALID)
+            elif kind == "ZDA" and len(fields) >= 5:
+                self._accept_zda_utc(fields[1], fields[2], fields[3], fields[4])
+            else:
+                return None
+        except (ValueError, OverflowError):
             return None
-        self._last["t_ns"] = time.monotonic_ns()
-        self._last["received_utc"] = datetime.now(timezone.utc).isoformat()
-        return dict(self._last)
+        return self._publish()
 
 
 class NmeaService:

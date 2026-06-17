@@ -21,6 +21,13 @@ from inputs import NmeaParser, NmeaService, TriggerService
 import server
 
 
+def nmea(body: str) -> str:
+    checksum = 0
+    for char in body:
+        checksum ^= ord(char)
+    return f"${body}*{checksum:02X}"
+
+
 class EgoLogTests(unittest.TestCase):
     def test_writer_creates_crc_valid_frames_with_source_metadata(self) -> None:
         metadata = {
@@ -68,7 +75,7 @@ class EgoLogTests(unittest.TestCase):
         self.assertEqual(ego_log.SESSION_EVENT_HEADER.size, 56)
         self.assertEqual(ego_log.CONFIG_HEADER.size, 52)
         self.assertEqual(ego_log.AUDIO_HEADER.size, 48)
-        self.assertEqual(ego_log.GPS_FIX.size, 56)
+        self.assertEqual(ego_log.GPS_FIX.size, 104)
         self.assertEqual(ego_log.TIME_STATUS.size, 40)
 
 
@@ -92,6 +99,35 @@ class NmeaTests(unittest.TestCase):
         assert rmc is not None
         self.assertAlmostEqual(rmc["speed_mps"], 22.4 * 0.514444, places=5)
         self.assertIn("utc_ns", rmc)
+
+    def test_gsa_gst_vtg_and_zda_extend_current_fix(self) -> None:
+        parser = NmeaParser()
+        self.assertIsNotNone(parser.ingest(nmea(
+            "GPGGA,123519,4807.038,N,01131.000,E,4,08,0.9,"
+            "545.4,M,46.9,M,1.2,1001"
+        )))
+        self.assertIsNotNone(parser.ingest(nmea(
+            "GPGSA,A,3,04,05,09,12,24,25,29,31,,,,,1.8,0.9,1.5"
+        )))
+        self.assertIsNotNone(parser.ingest(nmea(
+            "GPGST,123519,0.12,0.23,0.34,45.0,0.05,0.06,0.07"
+        )))
+        self.assertIsNotNone(parser.ingest(nmea(
+            "GPVTG,084.4,T,,M,022.4,N,041.5,K"
+        )))
+        fix = parser.ingest(nmea("GPZDA,123519.00,23,03,1994,00,00"))
+        self.assertIsNotNone(fix)
+        assert fix is not None
+        self.assertAlmostEqual(fix["pdop"], 1.8)
+        self.assertAlmostEqual(fix["vdop"], 1.5)
+        self.assertAlmostEqual(fix["gst_latitude_error_m"], 0.05)
+        self.assertAlmostEqual(fix["gst_longitude_error_m"], 0.06)
+        self.assertAlmostEqual(fix["gst_altitude_error_m"], 0.07)
+        self.assertAlmostEqual(fix["gst_rms_error_m"], 0.12)
+        self.assertAlmostEqual(fix["age_of_diff_s"], 1.2)
+        self.assertEqual(fix["base_station_id"], 1001)
+        self.assertAlmostEqual(fix["speed_mps"], 41.5 / 3.6, places=5)
+        self.assertIn("utc_ns", fix)
 
     def test_tcp_service_accepts_nmea_without_optional_serial_dependency(self) -> None:
         service = NmeaService(

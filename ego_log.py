@@ -16,7 +16,7 @@ FRAME_HEADER = struct.Struct("<IHHIIQQQQQIIII")
 SESSION_EVENT_HEADER = struct.Struct("<IHHIIQQQIIII")
 CONFIG_HEADER = struct.Struct("<IHHIIQIIIIIII")
 AUDIO_HEADER = struct.Struct("<QQQIHHIIII")
-GPS_FIX = struct.Struct("<QdddffffBBBBI")
+GPS_FIX = struct.Struct("<QdddffffBBBBIQffffIffffI")
 TIME_STATUS = struct.Struct("<QQqIIff")
 
 TYPE_SESSION_STARTED = 1
@@ -31,6 +31,22 @@ FLAG_BINARY = 1 << 1
 FLAG_KEYFRAME = 1 << 3
 SESSION_MAGIC = 0x31534553
 CONFIG_MAGIC = 0x31474643
+
+GPS_NMEA_FLAG_UTC_TIME_VALID = 1 << 0
+GPS_NMEA_FLAG_POSITION_VALID = 1 << 1
+GPS_NMEA_FLAG_ALTITUDE_VALID = 1 << 2
+GPS_NMEA_FLAG_HDOP_VALID = 1 << 3
+GPS_NMEA_FLAG_PDOP_VALID = 1 << 4
+GPS_NMEA_FLAG_VDOP_VALID = 1 << 5
+GPS_NMEA_FLAG_AGE_DIFF_VALID = 1 << 6
+GPS_NMEA_FLAG_BASE_STATION_VALID = 1 << 7
+GPS_NMEA_FLAG_SPEED_VALID = 1 << 8
+GPS_NMEA_FLAG_HEADING_VALID = 1 << 9
+GPS_NMEA_FLAG_GST_LAT_VALID = 1 << 10
+GPS_NMEA_FLAG_GST_LON_VALID = 1 << 11
+GPS_NMEA_FLAG_GST_ALT_VALID = 1 << 12
+GPS_NMEA_FLAG_GST_RMS_VALID = 1 << 13
+GPS_NMEA_FLAG_ZDA_TIME_USED = 1 << 14
 
 
 class EgoLogWriter:
@@ -140,6 +156,17 @@ class EgoLogWriter:
             float(fix.get("v_accuracy_m", 0.0)),
             int(fix.get("fix_type", 0)), int(fix.get("rtk_status", 0)),
             int(fix.get("satellites", 0)), 0, int(fix.get("flags", 0)),
+            int(fix.get("utc_ns", fix.get("utc_time_ns", 0)) or 0),
+            float(fix.get("hdop", 0.0)),
+            float(fix.get("pdop", 0.0)),
+            float(fix.get("vdop", 0.0)),
+            float(fix.get("age_of_diff_s", 0.0)),
+            int(fix.get("base_station_id", 0) or 0),
+            float(fix.get("gst_latitude_error_m", 0.0)),
+            float(fix.get("gst_longitude_error_m", 0.0)),
+            float(fix.get("gst_altitude_error_m", 0.0)),
+            float(fix.get("gst_rms_error_m", 0.0)),
+            int(fix.get("nmea_flags", 0)),
         )
         self._write_frame(TYPE_GPS_FIX, FLAG_BINARY, t_ns, t_ns, payload)
         utc_ns = fix.get("utc_ns")
