@@ -73,6 +73,8 @@ function statusText(status) {
 }
 
 function setToggleButtonState(onButton, offButton, active) {
+  onButton.disabled = false;
+  offButton.disabled = false;
   onButton.classList.toggle("state-active", Boolean(active));
   onButton.classList.toggle("state-muted", !active);
   offButton.classList.toggle("state-active", !active);

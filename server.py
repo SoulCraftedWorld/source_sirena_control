@@ -1038,7 +1038,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/audio/devices":
                 self._json(self.app.audio_devices(self._body()))
             elif parsed.path == "/api/interfaces/simulate-trigger":
-                self.app.trigger.simulate(bool(self._body()["active"]))
+                self.app.trigger.simulate(bool(self._body()["active"]), force=True)
                 self._json({"ok": True, "active": self.app.trigger.active})
             elif parsed.path == "/api/journal/clear":
                 self.log_handler.clear()

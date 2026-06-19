@@ -203,6 +203,19 @@ class TriggerTests(unittest.TestCase):
         self.assertFalse(service.available)
         self.assertTrue(service.error)
 
+    def test_force_simulation_can_override_gpio_state(self) -> None:
+        changes: list[bool] = []
+        service = TriggerService(
+            {"mode": "gpio", "gpio_bcm": 17}, changes.append
+        )
+        service.mode = "gpio"
+        service.available = True
+        with self.assertRaises(RuntimeError):
+            service.simulate(True)
+        service.simulate(True, force=True)
+        service.simulate(False, force=True)
+        self.assertEqual(changes, [True, False])
+
 
 class ConfigTests(unittest.TestCase):
     def test_default_config_is_portable(self) -> None:
@@ -266,6 +279,9 @@ class ConfigTests(unittest.TestCase):
                 result = app.stop_session()
                 path = app.log_path(session["log_name"])
                 self.assertTrue(path.is_file())
+                payload = path.read_bytes()
+                self.assertIn(b'"event":"siren_trigger"', payload)
+                self.assertIn(b'"active":true', payload)
                 self.assertEqual(result["correlation_key"], "S5_FT-D6.1_R3")
                 self.assertEqual(result["test_group"], "FT-D6")
                 self.assertEqual(

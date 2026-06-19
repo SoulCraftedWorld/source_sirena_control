@@ -441,8 +441,8 @@ class TriggerService:
         logging.info("Siren trigger %s", "ON" if active else "OFF")
         self.callback(active)
 
-    def simulate(self, active: bool) -> None:
-        if self.mode != "mock":
+    def simulate(self, active: bool, force: bool = False) -> None:
+        if self.mode != "mock" and not force:
             raise RuntimeError("trigger simulation requires mock/auto fallback mode")
         self._set(active)
 
