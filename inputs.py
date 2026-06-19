@@ -405,11 +405,15 @@ class TriggerService:
             pull = self.config.get("pull", "down")
             if pull not in {"down", "none"}:
                 raise ValueError("positive-on input supports pull=down or none")
+            device_kwargs = {
+                "pull_up": False if pull == "down" else None,
+                "bounce_time": float(self.config.get("debounce_ms", 10)) / 1000,
+            }
+            if pull == "none":
+                device_kwargs["active_state"] = True
             self.device = DigitalInputDevice(
                 int(self.config["gpio_bcm"]),
-                pull_up=False if pull == "down" else None,
-                active_state=True,
-                bounce_time=float(self.config.get("debounce_ms", 10)) / 1000,
+                **device_kwargs,
             )
             self.active = bool(self.device.is_active)
             self.device.when_activated = lambda: self._set(True)
