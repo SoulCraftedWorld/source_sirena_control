@@ -10,6 +10,7 @@ nav { display:flex; padding:0 22px; background:#1b1e21; border-bottom:1px solid 
 main { padding:16px 22px 28px; } .view{display:none}.view.active{display:block}
 button { min-height:34px; padding:6px 11px; color:#e8ebed; background:#292e32; border:1px solid #464c51; border-radius:5px; cursor:pointer; }
 button:hover{background:#353b40} button:disabled{opacity:.45}.primary{background:#216c4a;border-color:#31885f}.danger{color:#ffc3c3;background:#3e2929;border-color:#744242}
+.state-active{background:#1f7a50!important;border-color:#45b97b!important;color:#fff!important}.state-muted{opacity:.7}
 .badge{padding:7px 11px;border:1px solid #347257;border-radius:5px;background:#1e4935;color:#abebc9}
 .toolbar,.heading,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.toolbar{min-height:44px;margin-bottom:14px}.heading{justify-content:space-between;margin-bottom:10px}
 .panel{padding:13px;border:1px solid #363b3f;border-radius:5px;background:#181b1d}.history{margin-top:18px}
@@ -17,14 +18,19 @@ button:hover{background:#353b40} button:disabled{opacity:.45}.primary{background
 .form-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:11px}.form-grid label,.settings-grid label{display:grid;gap:5px;color:#b9bfc4;font-size:13px}.form-grid .wide{grid-column:span 2}
 input,select,textarea{width:100%;min-height:31px;padding:5px 7px;color:#f0f2f3;background:#111315;border:1px solid #41474c;border-radius:3px}textarea{resize:vertical}
 input[type=checkbox]{width:auto;min-height:0;accent-color:#43a876}
+.session-number-control{display:grid;grid-template-columns:minmax(90px,1fr) auto;gap:8px;align-items:center}.inline-checkbox{display:inline-flex!important;grid-template-columns:none!important;align-items:center;gap:5px;white-space:nowrap;color:#cbd1d5!important}
 .record-indicator{display:flex;gap:9px;align-items:center;padding:12px;background:#202427;border-radius:5px}.record-indicator i,.trigger-display i{width:13px;height:13px;border-radius:50%;background:#5b6267}.record-indicator.active i,.trigger-display.active i{background:#e94f49;box-shadow:0 0 9px #e94f49}
 #timer{margin:20px 0;font:600 36px Consolas,monospace}.actions button{flex:1}
+.simulation-actions{margin-top:9px}
 dl{margin:16px 0 0}dl div{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px solid #30353a}dt{color:#929aa0}dd{margin:0;overflow-wrap:anywhere}
-.settings-grid{display:grid;grid-template-columns:repeat(3,minmax(240px,1fr));gap:16px;margin-bottom:18px}fieldset{padding:12px;border:1px solid #3a4044;border-radius:5px}legend{padding:0 6px;font-weight:600}.settings-grid label{grid-template-columns:1fr 130px;align-items:center;min-height:39px}
+.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:16px;margin-bottom:18px}fieldset{padding:12px;border:1px solid #3a4044;border-radius:5px}legend{padding:0 6px;font-weight:600}.settings-grid label{grid-template-columns:minmax(150px,1fr) minmax(130px,1.1fr);align-items:center;min-height:39px}
+.fieldset-actions{display:flex;align-items:center;gap:8px;margin:8px 0 10px}.muted{color:#98a1a8;font-size:13px}
 .table-wrap{max-width:100%;overflow:auto;border:1px solid #34393d}table{width:100%;border-collapse:collapse;font-size:12px}th,td{height:38px;padding:5px 7px;text-align:center;white-space:nowrap;border-bottom:1px solid #303438}th{position:sticky;top:0;background:#222629;color:#b9bec2}
 .upload-actions{display:flex;gap:5px;justify-content:center}.upload-actions a{padding:6px 9px;color:#dce8ef;text-decoration:none;border:1px solid #464c51;border-radius:4px;background:#292e32}
+.link-button{min-height:0;padding:0;color:#b8dcff;background:transparent;border:0;text-decoration:underline;text-underline-offset:3px}.link-button:hover{background:transparent;color:#fff}
 .trigger-display{display:flex;align-items:center;justify-content:center;gap:10px;margin:14px;padding:14px;border:1px solid #34393d;border-radius:4px;font-size:20px}
 .status-grid{display:grid;grid-template-columns:repeat(3,1fr);margin:0}.status-grid div{grid-template-columns:120px 1fr;padding:10px}
+.analysis-panel{margin-top:18px}.analysis-panel pre{min-height:90px;max-height:180px;margin-top:12px}
 details{margin-top:15px;padding:12px;border:1px solid #34393d;border-radius:5px}summary{cursor:pointer}
 pre{min-height:500px;max-height:calc(100vh - 190px);padding:12px;overflow:auto;color:#d8e2db;background:#111513;border:1px solid #3c4540;border-radius:4px;font:12px/1.45 Consolas,monospace;white-space:pre;user-select:text}
 .inline{display:inline-flex;align-items:center;gap:6px}

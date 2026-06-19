@@ -4,16 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Source Sirena</title>
-  <link rel="stylesheet" href="/style.css?v=2">
+  <link rel="stylesheet" href="/style.css?v=4">
 </head>
 <body>
   <header>
-    <div><h1 id="title">Source Sirena</h1><p id="pageState">Запуск...</p></div>
-    <span id="sourceBadge" class="badge">Source —</span>
+    <div>
+      <h1 id="title">Источник сирены</h1>
+      <p id="pageState">Запуск...</p>
+    </div>
+    <span id="sourceBadge" class="badge">Source -</span>
   </header>
   <nav>
     <button class="tab active" data-view="sessions">Испытания</button>
-    <button class="tab" data-view="uploads">Загрузки</button>
     <button class="tab" data-view="interfaces">Интерфейсы</button>
     <button class="tab" data-view="journal">Журнал</button>
   </nav>
@@ -21,16 +23,33 @@
     <section id="sessions" class="view active">
       <div class="session-layout">
         <section class="panel">
-          <div class="heading"><h2>Паспорт испытания</h2><span id="sessionFormState">Готов</span></div>
+          <div class="heading">
+            <h2>Паспорт испытания</h2>
+            <span id="sessionFormState">Готов</span>
+          </div>
           <div class="form-grid">
-            <label>Группа испытаний<select id="testGroup"></select></label>
-            <label>Этап / сценарий<select id="testId"></select></label>
-            <label class="wide">Своё название<input id="customName" maxlength="96"></label>
-            <label>Номер сессии
-              <input id="sessionNumber" list="sessionNumbers" maxlength="24">
+            <label>Группа испытаний
+              <select id="testGroup"></select>
+            </label>
+            <label>Этап / сценарий
+              <select id="testId"></select>
+            </label>
+            <label class="wide">Своё название
+              <input id="customName" maxlength="96">
+            </label>
+            <label class="session-number-label">Номер сессии
+              <span class="session-number-control">
+                <input id="sessionNumber" list="sessionNumbers" maxlength="24" disabled>
+                <label class="inline-checkbox">
+                  <input id="sessionNumberManual" type="checkbox">
+                  вручную
+                </label>
+              </span>
               <datalist id="sessionNumbers"></datalist>
             </label>
-            <label>Номер повтора<input id="repeatNumber" type="number" min="1" value="1"></label>
+            <label>Номер повтора
+              <input id="repeatNumber" type="number" min="1" value="1">
+            </label>
             <label>Тип сирены
               <select id="sirenType">
                 <option value="">Нет / не задан</option>
@@ -40,69 +59,191 @@
                 <option>Другой тип</option>
               </select>
             </label>
-            <label>Оператор<input id="operator" maxlength="64"></label>
-            <label class="wide">Комментарий<textarea id="comment" rows="4" maxlength="320"></textarea></label>
+            <label>Оператор
+              <input id="operator" maxlength="64">
+            </label>
+            <label class="wide">Комментарий
+              <textarea id="comment" rows="4" maxlength="320"></textarea>
+            </label>
           </div>
         </section>
         <aside class="session-control">
-          <div id="recordIndicator" class="record-indicator"><i></i><strong id="recordText">Остановлено</strong></div>
+          <div id="recordIndicator" class="record-indicator">
+            <i></i>
+            <strong id="recordText">Остановлено</strong>
+          </div>
           <div id="timer">00:00:00</div>
-          <div class="actions"><button id="start" class="primary">Старт записи</button><button id="stop" class="danger" disabled>Стоп</button></div>
+          <div class="actions">
+            <button id="start" class="primary">Старт записи</button>
+            <button id="stop" class="danger" disabled>Стоп</button>
+          </div>
+          <div class="actions simulation-actions">
+            <button id="sessionTriggerOn">Сирена ON</button>
+            <button id="sessionTriggerOff">Сирена OFF</button>
+          </div>
           <dl>
-            <div><dt>Файл</dt><dd id="activeFile">—</dd></div>
+            <div><dt>Файл</dt><dd id="activeFile">-</dd></div>
             <div><dt>Размер</dt><dd id="activeSize">0 B</dd></div>
             <div><dt>Триггер сирены</dt><dd id="activeTrigger">OFF</dd></div>
-            <div><dt>NMEA</dt><dd id="activeNmea">—</dd></div>
+            <div><dt>NMEA</dt><dd id="activeNmea">-</dd></div>
             <div><dt>Аудиоблоки</dt><dd id="activeAudio">0</dd></div>
           </dl>
         </aside>
       </div>
-      <section class="panel history"><div class="heading"><h2>Последние сессии</h2></div><div class="table-wrap"><table><thead><tr><th>Source</th><th>№</th><th>Сценарий</th><th>Повтор</th><th>Начало UTC</th><th>Статус</th><th>Файл</th></tr></thead><tbody id="history"></tbody></table></div></section>
-    </section>
-
-    <section id="uploads" class="view">
-      <div class="toolbar"><button id="uploadsRefresh">Обновить</button><button id="s3Save" class="primary">Применить S3</button><button id="s3Test">Проверить S3</button><span id="uploadsState"></span></div>
-      <div class="settings-grid">
-        <fieldset><legend>S3</legend><label>Endpoint<input id="s3Endpoint"></label><label>Bucket<input id="s3Bucket"></label><label>Region<input id="s3Region"></label><label>Prefix<input id="s3Prefix"></label></fieldset>
-        <fieldset><legend>Доступ</legend><label>Access key<input id="s3Access"></label><label>Secret key<input id="s3Secret" type="password"></label><label>Session token<input id="s3Token" type="password"></label><label>Автозагрузка<input id="s3Auto" type="checkbox"></label></fieldset>
-        <fieldset><legend>Хранилище</legend><label>Каталог логов<input id="logsDir"></label><button id="logsDirSave">Изменить каталог</button><p>Свободно: <span id="localFree">—</span></p></fieldset>
-      </div>
-      <section class="panel"><div class="heading"><h2>Локальные бинарные логи</h2></div><div class="table-wrap"><table><thead><tr><th>Файл</th><th>Размер</th><th>UTC</th><th>Статус</th><th>Прогресс</th><th>Ошибка</th><th>Действия</th></tr></thead><tbody id="logs"></tbody></table></div></section>
+      <section class="panel history">
+        <div class="heading">
+          <h2>Последние сессии</h2>
+          <button id="logsRefresh">Обновить</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Файл</th>
+                <th>Размер</th>
+                <th>UTC</th>
+                <th>Испытание</th>
+                <th>Статус</th>
+                <th>Прогресс</th>
+                <th>Ошибка</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="logs"></tbody>
+          </table>
+        </div>
+      </section>
+      <section id="logAnalysisPanel" class="panel analysis-panel" hidden>
+        <div class="heading">
+          <h2 id="analysisTitle">Анализ GPS</h2>
+          <button id="analysisClose">Закрыть</button>
+        </div>
+        <dl class="status-grid">
+          <div><dt>Вывод</dt><dd id="analysisStatus">-</dd></div>
+          <div><dt>GPS fix</dt><dd id="analysisGpsFixes">-</dd></div>
+          <div><dt>Валидные fix</dt><dd id="analysisValidFixes">-</dd></div>
+          <div><dt>Макс. gap GPS</dt><dd id="analysisGpsGap">-</dd></div>
+          <div><dt>RTK float/fixed</dt><dd id="analysisRtk">-</dd></div>
+          <div><dt>Спутники max</dt><dd id="analysisSatellites">-</dd></div>
+          <div><dt>Точность H/V</dt><dd id="analysisAccuracy">-</dd></div>
+          <div><dt>DOP</dt><dd id="analysisDop">-</dd></div>
+          <div><dt>GST</dt><dd id="analysisGst">-</dd></div>
+        </dl>
+        <pre id="analysisDetails"></pre>
+      </section>
     </section>
 
     <section id="interfaces" class="view">
-      <div class="toolbar"><button id="interfacesRefresh">Обновить</button><button id="interfacesSave" class="primary">Применить интерфейсы</button><span id="interfacesState"></span></div>
+      <div class="toolbar">
+        <button id="interfacesRefresh">Обновить</button>
+        <button id="interfacesSave" class="primary">Применить интерфейсы</button>
+        <span id="interfacesState"></span>
+      </div>
       <div class="settings-grid">
         <fieldset><legend>NMEA</legend>
-          <label>Источник<select id="nmeaType"><option value="disabled">Отключён</option><option value="usb">USB serial</option><option value="uart">UART</option><option value="tcp">LAN TCP</option></select></label>
-          <label>USB устройство<input id="usbDevice"></label><label>USB baud<input id="usbBaud" type="number"></label>
-          <label>UART устройство<input id="uartDevice"></label><label>UART baud<input id="uartBaud" type="number"></label>
-          <label>TCP bind<input id="tcpBind"></label><label>TCP port<input id="tcpPort" type="number"></label>
+          <label>Источник
+            <select id="nmeaType">
+              <option value="disabled">Отключён</option>
+              <option value="usb">USB serial</option>
+              <option value="uart">UART</option>
+              <option value="tcp">LAN TCP приём</option>
+            </select>
+          </label>
+          <label>USB устройство <input id="usbDevice"></label>
+          <label>USB baud <input id="usbBaud" type="number"></label>
+          <label>UART устройство <input id="uartDevice"></label>
+          <label>UART baud <input id="uartBaud" type="number"></label>
+          <label>Порт приёма NMEA TCP <input id="tcpPort" type="number"></label>
         </fieldset>
         <fieldset><legend>Триггер сирены</legend>
-          <label>Режим<select id="triggerMode"><option value="auto">Auto</option><option value="gpio">GPIO Raspberry Pi</option><option value="mock">Имитация</option></select></label>
-          <label>GPIO BCM<input id="gpioPin" type="number"></label><label>Подтяжка<select id="gpioPull"><option value="down">Down</option><option value="none">Нет</option></select></label>
-          <label>Debounce, ms<input id="gpioDebounce" type="number"></label>
+          <label>Режим
+            <select id="triggerMode">
+              <option value="auto">Auto</option>
+              <option value="gpio">GPIO Raspberry Pi</option>
+              <option value="mock">Имитация</option>
+            </select>
+          </label>
+          <label>GPIO BCM <input id="gpioPin" type="number"></label>
+          <label>Подтяжка
+            <select id="gpioPull">
+              <option value="down">Down</option>
+              <option value="none">Нет</option>
+            </select>
+          </label>
+          <label>Debounce, ms <input id="gpioDebounce" type="number"></label>
           <div class="trigger-display"><i id="triggerLamp"></i><strong id="triggerState">OFF</strong></div>
           <p id="triggerBackendState" class="muted"></p>
-          <div class="actions"><button id="triggerOn">Имитация ON</button><button id="triggerOff">Имитация OFF</button></div>
+          <div class="actions">
+            <button id="triggerOn">Имитация ON</button>
+            <button id="triggerOff">Имитация OFF</button>
+          </div>
         </fieldset>
-        <fieldset><legend>USB-микрофон</legend>
-          <label>Записывать звук<input id="audioEnabled" type="checkbox"></label><label>ALSA-устройство<input id="alsaDevice" placeholder="hw:1,0"></label>
-          <label>Частота<input id="audioRate" type="number"></label><label>Каналы<input id="audioChannels" type="number"></label>
-          <label>Формат<input id="audioFormat"></label><label>Байт/отсчёт<input id="audioBytes" type="number"></label><label>Кадров/блок<input id="audioBlock" type="number"></label>
-          <p class="muted">На Raspberry Pi USB-микрофон выбирается по имени ALSA из <code>arecord -l</code>.</p>
+        <fieldset><legend>Микрофонный вход</legend>
+          <label>Записывать звук <input id="audioEnabled" type="checkbox"></label>
+          <label>Backend
+            <select id="audioBackend">
+              <option value="auto">Auto</option>
+              <option value="alsa">ALSA / Raspberry Pi</option>
+              <option value="windows">Windows microphone</option>
+            </select>
+          </label>
+          <label>ALSA устройство <input id="alsaDevice" placeholder="hw:1,0"></label>
+          <label>Windows устройство
+            <input id="windowsDevice" list="windowsDevices" placeholder="выберите микрофон">
+            <datalist id="windowsDevices"></datalist>
+          </label>
+          <label>ffmpeg <input id="ffmpegPath" placeholder="ffmpeg"></label>
+          <div class="fieldset-actions">
+            <button id="audioDevicesRefresh" type="button">Обновить устройства</button>
+            <span id="audioDevicesState" class="muted"></span>
+          </div>
+          <label>Частота <input id="audioRate" type="number"></label>
+          <label>Каналы <input id="audioChannels" type="number"></label>
+          <label>Формат <input id="audioFormat"></label>
+          <label>Байт/отсчёт <input id="audioBytes" type="number"></label>
+          <label>Кадров/блок <input id="audioBlock" type="number"></label>
+        </fieldset>
+        <fieldset><legend>Локальный EGO сервер</legend>
+          <label>Автоотправка после записи <input id="localpcEnabled" type="checkbox"></label>
+          <label>Host <input id="localpcHost"></label>
+          <label>Port <input id="localpcPort" type="number"></label>
+          <label>Connect timeout, s <input id="localpcTimeout" type="number" step="0.1"></label>
+          <label>Retry window, s <input id="localpcRetryWindow" type="number" step="0.1"></label>
+          <label>Retry interval, s <input id="localpcRetryInterval" type="number" step="0.1"></label>
         </fieldset>
       </div>
-      <section class="panel"><div class="heading"><h2>Текущее навигационное решение</h2><span id="nmeaStatus"></span></div><dl class="status-grid"><div><dt>Позиция</dt><dd id="fixPosition">—</dd></div><div><dt>Высота</dt><dd id="fixAltitude">—</dd></div><div><dt>Скорость</dt><dd id="fixSpeed">—</dd></div><div><dt>Курс</dt><dd id="fixHeading">—</dd></div><div><dt>Спутники</dt><dd id="fixSatellites">—</dd></div><div><dt>Принято / ошибок</dt><dd id="nmeaCounters">0 / 0</dd></div></dl></section>
-      <details><summary>Запись звука сирены</summary><p>Используется только акустическая запись через USB-микрофон. Электрический выход усилителя рупора к Raspberry Pi или USB-микрофону не подключается.</p></details>
+      <section class="panel">
+        <div class="heading">
+          <h2>Текущее навигационное решение</h2>
+          <span id="nmeaStatus"></span>
+        </div>
+        <dl class="status-grid">
+          <div><dt>Позиция</dt><dd id="fixPosition">-</dd></div>
+          <div><dt>Высота</dt><dd id="fixAltitude">-</dd></div>
+          <div><dt>Скорость</dt><dd id="fixSpeed">-</dd></div>
+          <div><dt>Курс</dt><dd id="fixHeading">-</dd></div>
+          <div><dt>Спутники</dt><dd id="fixSatellites">-</dd></div>
+          <div><dt>RTK / fix</dt><dd id="fixRtk">-</dd></div>
+          <div><dt>Точность H/V</dt><dd id="fixAccuracy">-</dd></div>
+          <div><dt>DOP</dt><dd id="fixDop">-</dd></div>
+          <div><dt>Diff / base</dt><dd id="fixDiff">-</dd></div>
+          <div><dt>GST</dt><dd id="fixGst">-</dd></div>
+          <div><dt>UTC</dt><dd id="fixUtc">-</dd></div>
+          <div><dt>Принято / ошибок</dt><dd id="nmeaCounters">0 / 0</dd></div>
+        </dl>
+      </section>
     </section>
 
     <section id="journal" class="view">
-      <div class="toolbar"><button id="journalRefresh">Обновить</button><button id="journalCopy">Копировать</button><button id="journalClear">Очистить окно</button><label class="inline"><input id="journalAuto" type="checkbox" checked>Автообновление</label></div>
+      <div class="toolbar">
+        <button id="journalRefresh">Обновить</button>
+        <button id="journalCopy">Копировать</button>
+        <button id="journalClear">Очистить окно</button>
+        <label class="inline"><input id="journalAuto" type="checkbox" checked>Автообновление</label>
+      </div>
       <pre id="journalOutput"></pre>
     </section>
   </main>
-  <script src="/app.js?v=3"></script>
+  <script src="/app.js?v=4"></script>
 </body>
 </html>

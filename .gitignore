@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 config.json
 session_history.json
+session_counter.json
 storage_settings.json
 logs/*
 !logs/.gitkeep

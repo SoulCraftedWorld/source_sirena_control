@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 import math
+import re
 import socket
 import subprocess
 import sys
@@ -465,17 +466,94 @@ class AudioCapture:
             return
         rate = int(self.config["sample_rate_hz"])
         channels = int(self.config["channels"])
-        sample_format = str(self.config.get("sample_format", "S32_LE"))
-        command = [
-            "arecord", "-q", "-D", str(self.config["alsa_device"]),
-            "-f", sample_format, "-r", str(rate), "-c", str(channels),
-            "-t", "raw",
-        ]
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE)
+        command = self._command(rate, channels)
+        self.process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
         self.thread = threading.Thread(
             target=self._run, name="source-audio", daemon=True
         )
         self.thread.start()
+
+    def _command(self, rate: int, channels: int) -> list[str]:
+        backend = str(self.config.get("backend", "auto")).strip().lower()
+        if backend == "auto":
+            backend = "windows" if sys.platform.startswith("win") else "alsa"
+        if backend in {"windows", "dshow", "ffmpeg"}:
+            return self._ffmpeg_dshow_command(rate, channels)
+        if backend != "alsa":
+            raise InputUnavailableError(f"unsupported audio backend: {backend}")
+        sample_format = str(self.config.get("sample_format", "S32_LE"))
+        return [
+            "arecord", "-q", "-D", str(self.config["alsa_device"]),
+            "-f", sample_format, "-r", str(rate), "-c", str(channels),
+            "-t", "raw",
+        ]
+
+    def _ffmpeg_dshow_command(self, rate: int, channels: int) -> list[str]:
+        sample_format = str(self.config.get("sample_format", "S16_LE"))
+        raw_format = {
+            "S16_LE": "s16le",
+            "S24_LE": "s24le",
+            "S32_LE": "s32le",
+            "F32_LE": "f32le",
+        }.get(sample_format.upper())
+        if raw_format is None:
+            raise InputUnavailableError(
+                f"unsupported ffmpeg audio sample format: {sample_format}"
+            )
+        device = str(self.config.get("windows_device", "default")).strip() or "default"
+        if not device.startswith("audio="):
+            device = f"audio={device}"
+        return [
+            str(self.config.get("ffmpeg_path", "ffmpeg")),
+            "-hide_banner", "-loglevel", "error",
+            "-f", "dshow", "-i", device,
+            "-ac", str(channels), "-ar", str(rate),
+            "-f", raw_format, "-",
+        ]
+
+    @staticmethod
+    def list_windows_devices(config: dict[str, Any]) -> dict[str, Any]:
+        ffmpeg = str(config.get("ffmpeg_path", "ffmpeg"))
+        command = [
+            ffmpeg, "-hide_banner", "-list_devices", "true",
+            "-f", "dshow", "-i", "dummy",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            return {"ok": False, "devices": [], "error": f"ffmpeg not found: {exc}"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "devices": [], "error": "ffmpeg device listing timed out"}
+        output = "\n".join(part for part in (result.stderr, result.stdout) if part)
+        devices: list[dict[str, str]] = []
+        pending: dict[str, str] | None = None
+        for line in output.splitlines():
+            match = re.search(r'"([^"]+)"\s+\((audio|video)\)', line)
+            if match:
+                pending = None
+                if match.group(2) == "audio":
+                    pending = {"name": match.group(1), "alternative": ""}
+                    devices.append(pending)
+                continue
+            alt = re.search(r'Alternative name\s+"([^"]+)"', line)
+            if alt and pending is not None:
+                pending["alternative"] = alt.group(1)
+        return {
+            "ok": bool(devices),
+            "devices": devices,
+            "error": "" if devices else "audio input devices were not found",
+            "raw": output[-4000:],
+        }
 
     def _run(self) -> None:
         assert self.process is not None and self.process.stdout is not None
@@ -504,5 +582,11 @@ class AudioCapture:
                 self.process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+            if self.process.stderr is not None and self.process.returncode not in (0, None):
+                message = self.process.stderr.read(4096).decode(
+                    "utf-8", errors="replace"
+                ).strip()
+                if message and not self.error:
+                    self.error = message
         if self.thread:
             self.thread.join(timeout=2)

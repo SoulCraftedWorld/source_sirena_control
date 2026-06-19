@@ -25,11 +25,14 @@
   },
   "audio": {
     "enabled": false,
+    "backend": "auto",
     "alsa_device": "hw:1,0",
+    "windows_device": "default",
+    "ffmpeg_path": "ffmpeg",
     "sample_rate_hz": 48000,
     "channels": 1,
-    "sample_format": "S32_LE",
-    "bytes_per_sample": 4,
+    "sample_format": "S16_LE",
+    "bytes_per_sample": 2,
     "block_frames": 1024
   },
   "s3": {

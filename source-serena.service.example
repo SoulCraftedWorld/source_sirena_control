@@ -5,15 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=admin
+Group=admin
 SupplementaryGroups=dialout gpio audio
-WorkingDirectory=/opt/sam-audio-starter-mod/tools/source_sirena
-ExecStart=/opt/sam-audio-starter-mod/tools/source_sirena/.venv/bin/python server.py
+WorkingDirectory=/home/admin/source_sirena
+ExecStart=/home/admin/source_sirena/.venv/bin/python server.py --bind 0.0.0.0 --port 80
 Restart=on-failure
 RestartSec=2
-# Environment=SOURCE_SIRENA_S3_SECRET_ACCESS_KEY=replace-me
-# Environment=SOURCE_SIRENA_S3_SESSION_TOKEN=
 
 [Install]
 WantedBy=multi-user.target

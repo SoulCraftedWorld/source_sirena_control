@@ -7,6 +7,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import queue
@@ -17,15 +18,18 @@ import threading
 import time
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+import zlib
 
-from ego_log import EgoLogWriter
+from ego_log import FRAME_HEADER, FRAME_MAGIC, GPS_FIX, TYPE_GPS_FIX, EgoLogWriter
 from inputs import AudioCapture, NmeaService, TriggerService
 
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
 HISTORY_PATH = ROOT / "session_history.json"
+COUNTER_PATH = ROOT / "session_counter.json"
 LOG_NAME_RE = re.compile(r"^SRC[1-3]_S[A-Za-z0-9_.-]+\.bin$")
+MAX_FRAME_PAYLOAD = 256 * 1024 * 1024
 
 TEST_CATALOG = [
     {"group": "LAB", "id": "LAB-01", "name": "Сирена, тип 1"},
@@ -73,6 +77,15 @@ TEST_CATALOG = [
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def increment_session_number(value: str) -> str:
+    text = str(value or "").strip()
+    match = re.match(r"^(.*?)(\d+)$", text)
+    if match is None:
+        return text
+    prefix, digits = match.groups()
+    return f"{prefix}{int(digits) + 1:0{len(digits)}d}"
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -312,13 +325,13 @@ class LocalPcSender:
     def settings(self) -> dict[str, Any]:
         return dict(self.app.config.get("localpc", {}))
 
-    def enqueue(self, name: str) -> None:
+    def enqueue(self, name: str, force: bool = False) -> bool:
         self.app.log_path(name)
-        if not self.settings().get("enabled", False):
-            return
+        if not force and not self.settings().get("enabled", False):
+            return False
         with self.lock:
             if name in self.queued:
-                return
+                return True
             self.queued.add(name)
             self.records[name] = {
                 "status": "queued",
@@ -326,6 +339,7 @@ class LocalPcSender:
                 "error": "",
             }
         self.queue.put(name)
+        return True
 
     def record(self, name: str) -> dict[str, Any]:
         with self.lock:
@@ -448,6 +462,41 @@ class SourceApplication:
     def _save_history(self) -> None:
         atomic_json(HISTORY_PATH, self.history[-100:])
 
+    def _load_counter(self) -> str:
+        try:
+            value = json.loads(COUNTER_PATH.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                return str(value.get("next_session_number", "")).strip()
+        except (OSError, json.JSONDecodeError):
+            pass
+        return ""
+
+    def _save_counter(self, next_session_number: str) -> None:
+        atomic_json(
+            COUNTER_PATH,
+            {"next_session_number": str(next_session_number).strip()},
+        )
+
+    @staticmethod
+    def _next_from_history(history: list[dict[str, Any]]) -> str:
+        highest = 0
+        width = 1
+        for item in history:
+            text = str(item.get("session_number", "")).strip()
+            if not text.isdigit():
+                continue
+            highest = max(highest, int(text))
+            width = max(width, len(text))
+        return f"{highest + 1:0{width}d}" if highest else "1"
+
+    def _next_session_number(self) -> str:
+        return self._load_counter() or self._next_from_history(self.history)
+
+    def _advance_counter(self, session_number: str) -> None:
+        next_number = increment_session_number(session_number)
+        if next_number and next_number != session_number:
+            self._save_counter(next_number)
+
     def save_config(self) -> None:
         atomic_json(self.config_path, self.config)
 
@@ -512,7 +561,11 @@ class SourceApplication:
                 int(value) if value.isdigit() else value,
             ),
         )
-        return {"tests": TEST_CATALOG, "session_numbers": numbers}
+        return {
+            "tests": TEST_CATALOG,
+            "session_numbers": numbers,
+            "next_session_number": self._next_session_number(),
+        }
 
     def start_session(self, raw: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -564,6 +617,7 @@ class SourceApplication:
                 self.audio.error = str(exc)
                 logging.exception("Audio input could not start")
             self.history.append(dict(metadata, status="running"))
+            self._advance_counter(session_number)
             self._save_history()
             logging.info("Session started: %s", name)
             return dict(metadata)
@@ -595,8 +649,6 @@ class SourceApplication:
             self._save_history()
             logging.info("Session stopped: %s", name)
             self.localpc.enqueue(name)
-            if self.config["s3"].get("auto_upload"):
-                self.uploader.enqueue(name)
             return dict(metadata)
 
     def session_state(self) -> dict[str, Any]:
@@ -622,6 +674,7 @@ class SourceApplication:
                 "nmea": self.config["nmea"],
                 "siren_trigger": self.config["siren_trigger"],
                 "audio": self.config["audio"],
+                "localpc": self.config.get("localpc", {}),
             },
             "nmea": self.nmea.status,
             "trigger": {
@@ -651,32 +704,189 @@ class SourceApplication:
                     "nmea": raw.get("nmea", {}),
                     "siren_trigger": raw.get("siren_trigger", {}),
                     "audio": raw.get("audio", {}),
+                    "localpc": raw.get("localpc", {}),
                 },
             )
             self.save_config()
             self._start_inputs()
             return self.interfaces_state()
 
-    def uploads_state(self) -> dict[str, Any]:
+    def audio_devices(self, raw: dict[str, Any] | None = None) -> dict[str, Any]:
+        config = dict(self.config.get("audio", {}))
+        if raw:
+            config.update(raw.get("audio", raw))
+        return AudioCapture.list_windows_devices(config)
+
+    @staticmethod
+    def _history_by_log(history: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        return {
+            str(item.get("log_name")): item
+            for item in history
+            if item.get("log_name")
+        }
+
+    def logs_state(self) -> dict[str, Any]:
+        history = self._history_by_log(self.history)
         logs = []
         for path in sorted(
             self.logs_dir.glob("SRC*.bin"),
             key=lambda item: item.stat().st_mtime, reverse=True,
         ):
             stat = path.stat()
+            localpc = self.localpc.record(path.name)
+            session = history.get(path.name, {})
             logs.append({
                 "name": path.name, "size": stat.st_size,
                 "modified_utc": datetime.fromtimestamp(
                     stat.st_mtime, timezone.utc
                 ).isoformat(),
-            } | self.uploader.record(path.name) | {
-                "localpc": self.localpc.record(path.name)
+                "session_number": session.get("session_number", ""),
+                "test_id": session.get("test_id", ""),
+                "repeat_number": session.get("repeat_number", ""),
+                "status": localpc.get("status", "local"),
+                "progress_bytes": localpc.get("progress_bytes", 0),
+                "error": localpc.get("error", ""),
+                "localpc": localpc,
             })
         return {
             "logs": logs,
             "local_dir": str(self.logs_dir),
             "local_free_bytes": shutil.disk_usage(self.logs_dir).free,
-            "settings": self.uploader.public_settings(),
+            "localpc": self.localpc.settings(),
+        }
+
+    def uploads_state(self) -> dict[str, Any]:
+        return self.logs_state()
+
+    def send_log_to_localpc(self, name: str) -> dict[str, Any]:
+        queued = self.localpc.enqueue(name, force=True)
+        return {"ok": queued, "record": self.localpc.record(name)}
+
+    def analyze_log(self, name: str) -> dict[str, Any]:
+        path = self.log_path(name)
+        stat = path.stat()
+        gps = {
+            "fixes": 0,
+            "valid_fixes": 0,
+            "rtk_float": 0,
+            "rtk_fixed": 0,
+            "max_satellites": 0,
+            "max_fix_gap_s": 0.0,
+            "last": None,
+        }
+        integrity = {
+            "frames": 0,
+            "gps_frames": 0,
+            "header_crc_errors": 0,
+            "payload_crc_errors": 0,
+            "truncated": False,
+            "error": "",
+        }
+        previous_gps_t_ns: int | None = None
+        try:
+            with path.open("rb") as stream:
+                while True:
+                    header_bytes = stream.read(FRAME_HEADER.size)
+                    if not header_bytes:
+                        break
+                    if len(header_bytes) != FRAME_HEADER.size:
+                        integrity["truncated"] = True
+                        break
+                    header = FRAME_HEADER.unpack(header_bytes)
+                    if header[0] != FRAME_MAGIC:
+                        integrity["error"] = "invalid frame magic"
+                        break
+                    payload_size = int(header[10])
+                    if payload_size < 0 or payload_size > MAX_FRAME_PAYLOAD:
+                        integrity["error"] = "invalid payload size"
+                        break
+                    checked = bytearray(header_bytes)
+                    checked[64:68] = b"\0\0\0\0"
+                    if zlib.crc32(checked) & 0xFFFFFFFF != int(header[12]):
+                        integrity["header_crc_errors"] += 1
+                    payload = stream.read(payload_size)
+                    if len(payload) != payload_size:
+                        integrity["truncated"] = True
+                        break
+                    if zlib.crc32(payload) & 0xFFFFFFFF != int(header[11]):
+                        integrity["payload_crc_errors"] += 1
+                    integrity["frames"] += 1
+                    if int(header[3]) != TYPE_GPS_FIX or len(payload) < GPS_FIX.size:
+                        continue
+                    values = GPS_FIX.unpack_from(payload)
+                    integrity["gps_frames"] += 1
+                    gps["fixes"] += 1
+                    t_ns = int(values[0])
+                    if previous_gps_t_ns is not None:
+                        gps["max_fix_gap_s"] = max(
+                            gps["max_fix_gap_s"],
+                            max(0.0, (t_ns - previous_gps_t_ns) / 1_000_000_000),
+                        )
+                    previous_gps_t_ns = t_ns
+                    fix_type = int(values[8])
+                    rtk_status = int(values[9])
+                    satellites = int(values[10])
+                    lat = float(values[1])
+                    lon = float(values[2])
+                    if fix_type > 0 and math.isfinite(lat) and math.isfinite(lon):
+                        gps["valid_fixes"] += 1
+                    gps["rtk_float"] += 1 if rtk_status == 1 else 0
+                    gps["rtk_fixed"] += 1 if rtk_status == 2 else 0
+                    gps["max_satellites"] = max(gps["max_satellites"], satellites)
+                    gps["last"] = {
+                        "latitude_deg": lat,
+                        "longitude_deg": lon,
+                        "altitude_m": float(values[3]),
+                        "speed_kph": float(values[4]) * 3.6,
+                        "heading_deg": math.degrees(float(values[5])),
+                        "h_accuracy_m": float(values[6]),
+                        "v_accuracy_m": float(values[7]),
+                        "fix_type": fix_type,
+                        "rtk_status": rtk_status,
+                        "satellites": satellites,
+                        "utc_time_ns": int(values[13]),
+                        "hdop": float(values[14]),
+                        "pdop": float(values[15]),
+                        "vdop": float(values[16]),
+                        "age_of_diff_s": float(values[17]),
+                        "base_station_id": int(values[18]),
+                        "gst_latitude_error_m": float(values[19]),
+                        "gst_longitude_error_m": float(values[20]),
+                        "gst_altitude_error_m": float(values[21]),
+                        "gst_rms_error_m": float(values[22]),
+                        "nmea_flags": int(values[23]),
+                    }
+        except OSError as exc:
+            integrity["error"] = str(exc)
+        status = "ok"
+        reasons: list[str] = []
+        if integrity["error"] or integrity["truncated"] or integrity["header_crc_errors"] or integrity["payload_crc_errors"]:
+            status = "error"
+            reasons.append("есть ошибки целостности файла")
+        if gps["fixes"] == 0:
+            status = "error"
+            reasons.append("GPS-кадры отсутствуют")
+        elif gps["valid_fixes"] == 0:
+            status = "error"
+            reasons.append("нет валидных GPS fix")
+        elif gps["valid_fixes"] < gps["fixes"]:
+            status = "warn" if status == "ok" else status
+            reasons.append("часть GPS fix невалидна")
+        if float(gps["max_fix_gap_s"]) > 2.0:
+            status = "warn" if status == "ok" else status
+            reasons.append(f"максимальный разрыв GPS {gps['max_fix_gap_s']:.2f} с")
+        if not reasons:
+            reasons.append("GPS-сигнал по логу выглядит исправным")
+        return {
+            "name": path.name,
+            "size": stat.st_size,
+            "modified_utc": datetime.fromtimestamp(
+                stat.st_mtime, timezone.utc
+            ).isoformat(),
+            "status": status,
+            "reasons": reasons,
+            "integrity": integrity,
+            "gps": gps,
         }
 
     def delete_log(self, name: str) -> None:
@@ -768,8 +978,18 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/uploads/local":
                 name = parse_qs(parsed.query).get("name", [""])[0]
                 self._download(name)
+            elif parsed.path == "/api/logs/state":
+                self._json(self.app.logs_state())
+            elif parsed.path == "/api/logs/local":
+                name = parse_qs(parsed.query).get("name", [""])[0]
+                self._download(name)
+            elif parsed.path == "/api/logs/analyze":
+                name = parse_qs(parsed.query).get("name", [""])[0]
+                self._json(self.app.analyze_log(name))
             elif parsed.path == "/api/interfaces":
                 self._json(self.app.interfaces_state())
+            elif parsed.path == "/api/audio/devices":
+                self._json(self.app.audio_devices())
             elif parsed.path == "/api/journal":
                 query = parse_qs(parsed.query)
                 after_text = query.get("after", [""])[0]
@@ -799,7 +1019,12 @@ class Handler(BaseHTTPRequestHandler):
                 name = str(self._body()["name"])
                 self.app.uploader.enqueue(name)
                 self._json({"ok": True})
+            elif parsed.path == "/api/logs/send":
+                self._json(self.app.send_log_to_localpc(str(self._body()["name"])))
             elif parsed.path == "/api/uploads/delete":
+                self.app.delete_log(str(self._body()["name"]))
+                self._json({"ok": True})
+            elif parsed.path == "/api/logs/delete":
                 self.app.delete_log(str(self._body()["name"]))
                 self._json({"ok": True})
             elif parsed.path == "/api/uploads/cancel":
@@ -810,6 +1035,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.app.set_logs_dir(str(self._body()["path"])))
             elif parsed.path == "/api/interfaces":
                 self._json(self.app.save_interfaces(self._body()))
+            elif parsed.path == "/api/audio/devices":
+                self._json(self.app.audio_devices(self._body()))
             elif parsed.path == "/api/interfaces/simulate-trigger":
                 self.app.trigger.simulate(bool(self._body()["active"]))
                 self._json({"ok": True, "active": self.app.trigger.active})

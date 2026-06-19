@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -17,7 +18,7 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 
 import ego_log
-from inputs import NmeaParser, NmeaService, TriggerService
+from inputs import AudioCapture, NmeaParser, NmeaService, TriggerService
 import server
 
 
@@ -246,7 +247,9 @@ class ConfigTests(unittest.TestCase):
             config_path = root / "config.json"
             config_path.write_text(json.dumps(example), encoding="utf-8")
             previous_history = server.HISTORY_PATH
+            previous_counter = server.COUNTER_PATH
             server.HISTORY_PATH = root / "history.json"
+            server.COUNTER_PATH = root / "counter.json"
             app = server.SourceApplication(config_path)
             try:
                 session = app.start_session({
@@ -276,6 +279,80 @@ class ConfigTests(unittest.TestCase):
             finally:
                 app.close()
                 server.HISTORY_PATH = previous_history
+                server.COUNTER_PATH = previous_counter
+
+    def test_session_catalog_exposes_and_advances_next_session_number(self) -> None:
+        example = json.loads(
+            (ROOT / "config.example.json").read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            example["storage"]["logs_dir"] = str(root / "logs")
+            example["nmea"]["type"] = "disabled"
+            example["siren_trigger"]["mock"] = True
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(example), encoding="utf-8")
+            previous_history = server.HISTORY_PATH
+            previous_counter = server.COUNTER_PATH
+            server.HISTORY_PATH = root / "history.json"
+            server.COUNTER_PATH = root / "counter.json"
+            app = server.SourceApplication(config_path)
+            try:
+                self.assertEqual(app.session_catalog()["next_session_number"], "1")
+                app.start_session({"session_number": "001", "test_id": "LAB-01"})
+                app.stop_session()
+                self.assertEqual(app.session_catalog()["next_session_number"], "002")
+            finally:
+                app.close()
+                server.HISTORY_PATH = previous_history
+                server.COUNTER_PATH = previous_counter
+
+    def test_log_analysis_reports_valid_gps(self) -> None:
+        metadata = {
+            "source_id": 1,
+            "source_name": "Source 1",
+            "correlation_key": "S1_LAB-01_R1",
+            "test_id": "LAB-01",
+        }
+        config = json.loads(
+            (ROOT / "config.example.json").read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config["storage"]["logs_dir"] = str(root / "logs")
+            config["nmea"]["type"] = "disabled"
+            config["siren_trigger"]["mock"] = True
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            previous_history = server.HISTORY_PATH
+            previous_counter = server.COUNTER_PATH
+            server.HISTORY_PATH = root / "history.json"
+            server.COUNTER_PATH = root / "counter.json"
+            app = server.SourceApplication(config_path)
+            try:
+                name = "SRC1_S1_LAB-01_R1_TEST.bin"
+                writer = ego_log.EgoLogWriter(app.log_path(name), metadata, config)
+                writer.write_gps({
+                    "latitude_deg": 53.9,
+                    "longitude_deg": 27.56,
+                    "fix_type": 1,
+                    "satellites": 12,
+                    "h_accuracy_m": 0.8,
+                    "v_accuracy_m": 1.2,
+                    "hdop": 0.7,
+                    "pdop": 1.1,
+                    "vdop": 1.4,
+                })
+                writer.close(metadata)
+                analysis = app.analyze_log(name)
+                self.assertEqual(analysis["status"], "ok")
+                self.assertEqual(analysis["gps"]["fixes"], 1)
+                self.assertEqual(analysis["gps"]["valid_fixes"], 1)
+                self.assertEqual(analysis["gps"]["max_satellites"], 12)
+            finally:
+                app.close()
+                server.HISTORY_PATH = previous_history
+                server.COUNTER_PATH = previous_counter
 
     def test_completed_session_is_pushed_to_localpc_tcp(self) -> None:
         example = json.loads(
@@ -325,7 +402,9 @@ class ConfigTests(unittest.TestCase):
             config_path = root / "config.json"
             config_path.write_text(json.dumps(example), encoding="utf-8")
             previous_history = server.HISTORY_PATH
+            previous_counter = server.COUNTER_PATH
             server.HISTORY_PATH = root / "history.json"
+            server.COUNTER_PATH = root / "counter.json"
             app = server.SourceApplication(config_path)
             try:
                 session = app.start_session({
@@ -342,7 +421,114 @@ class ConfigTests(unittest.TestCase):
             finally:
                 app.close()
                 server.HISTORY_PATH = previous_history
+                server.COUNTER_PATH = previous_counter
                 listener.close()
+
+    def test_manual_localpc_send_works_when_auto_disabled(self) -> None:
+        example = json.loads(
+            (ROOT / "config.example.json").read_text(encoding="utf-8")
+        )
+        received: dict[str, object] = {}
+        ready = threading.Event()
+        done = threading.Event()
+
+        def tcp_receiver(listener: socket.socket) -> None:
+            listener.listen(1)
+            ready.set()
+            conn, _ = listener.accept()
+            with conn, conn.makefile("rb") as stream:
+                header = json.loads(stream.readline().decode("utf-8"))
+                payload = stream.read(int(header["size"]))
+                received["name"] = header["name"]
+                received["payload_size"] = len(payload)
+                conn.sendall(b"OK stored\n")
+            done.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+            thread = threading.Thread(
+                target=tcp_receiver, args=(listener,), daemon=True
+            )
+            thread.start()
+            self.assertTrue(ready.wait(1.0))
+
+            example["storage"]["logs_dir"] = str(root / "logs")
+            example["nmea"]["type"] = "disabled"
+            example["siren_trigger"]["mock"] = True
+            example["audio"]["enabled"] = False
+            example["localpc"].update(
+                {
+                    "enabled": False,
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "retry_window_s": 2.0,
+                    "retry_interval_s": 0.1,
+                }
+            )
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(example), encoding="utf-8")
+            previous_history = server.HISTORY_PATH
+            previous_counter = server.COUNTER_PATH
+            server.HISTORY_PATH = root / "history.json"
+            server.COUNTER_PATH = root / "counter.json"
+            app = server.SourceApplication(config_path)
+            try:
+                session = app.start_session({
+                    "session_number": "7",
+                    "test_id": "LAB-01",
+                })
+                app.stop_session()
+                app.send_log_to_localpc(session["log_name"])
+                self.assertTrue(done.wait(2.0))
+                self.assertEqual(received["name"], session["log_name"])
+                self.assertGreater(received["payload_size"], 0)
+            finally:
+                app.close()
+                server.HISTORY_PATH = previous_history
+                server.COUNTER_PATH = previous_counter
+                listener.close()
+
+
+class AudioCaptureTests(unittest.TestCase):
+    def test_windows_audio_backend_uses_ffmpeg_dshow(self) -> None:
+        capture = AudioCapture(
+            {
+                "backend": "windows",
+                "windows_device": "default",
+                "ffmpeg_path": "ffmpeg",
+                "sample_format": "S16_LE",
+            },
+            lambda data, rate, channels, sample_bytes, frames: None,
+        )
+        command = capture._command(48000, 1)
+        self.assertEqual(command[:6], [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "dshow",
+        ])
+        self.assertIn("audio=default", command)
+        self.assertEqual(command[-2:], ["s16le", "-"])
+
+    def test_windows_audio_device_listing_parses_ffmpeg_output(self) -> None:
+        output = '''
+[dshow @ 000001] "Integrated Camera" (video)
+[dshow @ 000001] "Microphone Array (Realtek(R) Audio)" (audio)
+[dshow @ 000001]   Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{ABC}"
+[dshow @ 000001] "Stereo Mix (Realtek(R) Audio)" (audio)
+'''
+        completed = subprocess.CompletedProcess(
+            args=["ffmpeg"], returncode=1, stdout="", stderr=output
+        )
+        with mock.patch("inputs.subprocess.run", return_value=completed):
+            result = AudioCapture.list_windows_devices({"ffmpeg_path": "ffmpeg"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["devices"]), 2)
+        self.assertEqual(
+            result["devices"][0]["name"],
+            "Microphone Array (Realtek(R) Audio)",
+        )
+        self.assertTrue(result["devices"][0]["alternative"].startswith("@device_cm_"))
 
 
 if __name__ == "__main__":
