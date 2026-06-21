@@ -294,6 +294,7 @@ function renderInterfacesState(state) {
   const a = c.audio;
   const l = c.localpc || {};
   if (document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "SELECT") {
+    $("sourceId").value = c.source_id || 1;
     $("nmeaType").value = n.type;
     $("usbDevice").value = n.usb_device;
     $("usbBaud").value = n.usb_baud;
@@ -354,6 +355,7 @@ function renderInterfacesState(state) {
 
 function interfacesPayload() {
   return {
+    source_id: Math.max(1, Math.min(3, number("sourceId") || 1)),
     nmea: {
       type: $("nmeaType").value,
       usb_device: $("usbDevice").value,

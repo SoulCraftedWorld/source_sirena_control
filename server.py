@@ -671,6 +671,8 @@ class SourceApplication:
     def interfaces_state(self) -> dict[str, Any]:
         return {
             "config": {
+                "source_id": int(self.config["source_id"]),
+                "source_name": self.config.get("source_name", ""),
                 "nmea": self.config["nmea"],
                 "siren_trigger": self.config["siren_trigger"],
                 "audio": self.config["audio"],
@@ -693,20 +695,28 @@ class SourceApplication:
         }
 
     def save_interfaces(self, raw: dict[str, Any]) -> dict[str, Any]:
+        source_id = int(raw.get("source_id", self.config["source_id"]))
+        if source_id < 1 or source_id > 3:
+            raise ValueError("source_id must be 1..3")
         with self.lock:
             if self.writer:
                 raise RuntimeError("cannot change interfaces during session")
         self._stop_inputs()
         with self.lock:
+            previous_source_name = str(self.config.get("source_name", ""))
+            previous_source_id = int(self.config["source_id"])
             self.config = deep_merge(
                 self.config,
                 {
+                    "source_id": source_id,
                     "nmea": raw.get("nmea", {}),
                     "siren_trigger": raw.get("siren_trigger", {}),
                     "audio": raw.get("audio", {}),
                     "localpc": raw.get("localpc", {}),
                 },
             )
+            if previous_source_name in ("", f"Source {previous_source_id}"):
+                self.config["source_name"] = f"Source {source_id}"
             self.save_config()
             self._start_inputs()
             return self.interfaces_state()

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Source Sirena</title>
-  <link rel="stylesheet" href="/style.css?v=4">
+  <link rel="stylesheet" href="/style.css?v=5">
 </head>
 <body>
   <header>
@@ -16,7 +16,7 @@
   </header>
   <nav>
     <button class="tab active" data-view="sessions">Испытания</button>
-    <button class="tab" data-view="interfaces">Интерфейсы</button>
+    <button class="tab" data-view="interfaces">Настройки</button>
     <button class="tab" data-view="journal">Журнал</button>
   </nav>
   <main>
@@ -136,10 +136,15 @@
     <section id="interfaces" class="view">
       <div class="toolbar">
         <button id="interfacesRefresh">Обновить</button>
-        <button id="interfacesSave" class="primary">Применить интерфейсы</button>
+        <button id="interfacesSave" class="primary">Применить настройки</button>
         <span id="interfacesState"></span>
       </div>
       <div class="settings-grid">
+        <fieldset><legend>Источник сирены</legend>
+          <label>Номер источника сирены
+            <input id="sourceId" type="number" min="1" max="3" step="1">
+          </label>
+        </fieldset>
         <fieldset><legend>NMEA</legend>
           <label>Источник
             <select id="nmeaType">
@@ -244,6 +249,6 @@
       <pre id="journalOutput"></pre>
     </section>
   </main>
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>
