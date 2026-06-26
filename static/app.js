@@ -348,6 +348,7 @@ function renderInterfacesState(state) {
   const g = c.siren_trigger;
   const a = c.audio;
   const l = c.localpc || {};
+  const e = c.ego_sync || {};
   if (document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "SELECT") {
     $("sourceId").value = c.source_id || 1;
     $("nmeaType").value = n.type;
@@ -372,6 +373,7 @@ function renderInterfacesState(state) {
     $("audioBlock").value = a.block_frames;
     $("localpcEnabled").checked = Boolean(l.enabled);
     $("localpcHost").value = l.host || "";
+    $("egoSyncWebPort").value = e.web_port || 80;
     $("localpcPort").value = l.port || 10201;
     $("localpcTimeout").value = l.connect_timeout_s || 3;
     $("localpcRetryWindow").value = l.retry_window_s || 20;
@@ -445,6 +447,9 @@ function interfacesPayload() {
       connect_timeout_s: number("localpcTimeout"),
       retry_window_s: number("localpcRetryWindow"),
       retry_interval_s: number("localpcRetryInterval"),
+    },
+    ego_sync: {
+      web_port: number("egoSyncWebPort") || 80,
     },
   };
 }

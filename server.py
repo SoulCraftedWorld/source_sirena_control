@@ -440,6 +440,7 @@ class LocalPcSender:
 class EgoSyncClient:
     def __init__(self, app: "SourceApplication") -> None:
         self.app = app
+        self._last_good_url = ""
         self.stop_event = threading.Event()
         self.worker = threading.Thread(
             target=self._run, name="source-ego-sync", daemon=True
@@ -449,23 +450,50 @@ class EgoSyncClient:
     def _settings(self) -> dict[str, Any]:
         return dict(self.app.config.get("ego_sync", {}))
 
-    def _url(self) -> str:
+    def _urls(self) -> list[str]:
         settings = self._settings()
         base_url = str(settings.get("base_url") or "").strip().rstrip("/")
         if base_url:
-            return base_url
+            return [base_url]
         host = str(
             settings.get("host")
             or self.app.config.get("localpc", {}).get("host")
             or ""
         ).strip()
         if not host:
-            return ""
+            return []
         if host.startswith("http://") or host.startswith("https://"):
-            return host.rstrip("/")
+            return [host.rstrip("/")]
         port = int(settings.get("web_port") or 80)
-        suffix = "" if port == 80 else f":{port}"
-        return f"http://{host}{suffix}"
+        urls: list[str] = []
+
+        def add(candidate_host: str, candidate_port: int) -> None:
+            suffix = "" if candidate_port == 80 else f":{candidate_port}"
+            url = f"http://{candidate_host}{suffix}"
+            if url not in urls:
+                urls.append(url)
+
+        local_hosts = {"127.0.0.1", "localhost", "0.0.0.0"}
+        if port == 80 and host in local_hosts:
+            add(host, 8080)
+            add("127.0.0.1", 8080)
+            add("localhost", 8080)
+            add(host, port)
+        else:
+            add(host, port)
+            if port == 80:
+                add(host, 8080)
+            add("127.0.0.1", 8080)
+            add("localhost", 8080)
+        return urls
+
+    def _ordered_urls(self) -> list[str]:
+        urls = self._urls()
+        if self._last_good_url and self._last_good_url in urls:
+            return [self._last_good_url] + [
+                url for url in urls if url != self._last_good_url
+            ]
+        return urls
 
     @staticmethod
     def _post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -484,15 +512,26 @@ class EgoSyncClient:
             settings = self._settings()
             timeout = float(settings.get("timeout_s") or 2.0)
             interval = min(1.0, float(settings.get("poll_interval_s") or 1.0))
-            base_url = self._url()
+            base_urls = self._ordered_urls()
             try:
-                if not base_url:
+                if not base_urls:
                     raise RuntimeError("EGO host is not configured")
-                response = self._post_json(
-                    f"{base_url}/api/source-sync/poll",
-                    self.app.ego_sync_poll_payload(),
-                    timeout,
-                )
+                response = None
+                last_error: Exception | None = None
+                payload = self.app.ego_sync_poll_payload()
+                for base_url in base_urls:
+                    try:
+                        response = self._post_json(
+                            f"{base_url}/api/source-sync/poll",
+                            payload,
+                            timeout,
+                        )
+                        self._last_good_url = base_url
+                        break
+                    except (OSError, HTTPError, URLError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                        last_error = exc
+                if response is None:
+                    raise RuntimeError(str(last_error) if last_error else "EGO is not reachable")
                 desired = response.get("desired")
                 if desired and self.app.ego_sync_enabled():
                     self.app.apply_ego_sync(desired)
@@ -715,6 +754,11 @@ class SourceApplication:
                 config["enabled"] = bool(raw.get("enabled"))
             if "start_with_ego" in raw:
                 config["start_with_ego"] = bool(raw.get("start_with_ego"))
+            if "web_port" in raw:
+                web_port = int(raw.get("web_port") or 80)
+                if web_port < 1 or web_port > 65535:
+                    raise ValueError("EGO web port must be 1..65535")
+                config["web_port"] = web_port
             self.save_config()
         return self.ego_sync_state()
 
@@ -937,6 +981,12 @@ class SourceApplication:
         with self.lock:
             previous_source_name = str(self.config.get("source_name", ""))
             previous_source_id = int(self.config["source_id"])
+            ego_sync = dict(raw.get("ego_sync", {}))
+            if "web_port" in ego_sync:
+                web_port = int(ego_sync.get("web_port") or 80)
+                if web_port < 1 or web_port > 65535:
+                    raise ValueError("EGO web port must be 1..65535")
+                ego_sync["web_port"] = web_port
             self.config = deep_merge(
                 self.config,
                 {
@@ -945,6 +995,7 @@ class SourceApplication:
                     "siren_trigger": raw.get("siren_trigger", {}),
                     "audio": raw.get("audio", {}),
                     "localpc": raw.get("localpc", {}),
+                    "ego_sync": ego_sync,
                 },
             )
             if previous_source_name in ("", f"Source {previous_source_id}"):

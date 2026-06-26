@@ -54,6 +54,7 @@
   "ego_sync": {
     "enabled": true,
     "start_with_ego": true,
+    "base_url": "",
     "web_port": 80,
     "poll_interval_s": 1.0,
     "timeout_s": 2.0
