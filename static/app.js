@@ -8,6 +8,7 @@ let journalLines = [];
 let nextSessionNumber = "1";
 let sessionNumberManual = false;
 let currentSessionRunning = false;
+let lastAppliedEgoSyncVersion = 0;
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -130,6 +131,54 @@ function sessionPayload() {
   };
 }
 
+function applyEgoSyncFields(sync = {}) {
+  if (!sync.enabled || currentSessionRunning) return;
+  const fields = sync.applied_fields || {};
+  const version = Number(sync.applied_version) || 0;
+  if (!version || version === lastAppliedEgoSyncVersion) return;
+  lastAppliedEgoSyncVersion = version;
+  if (fields.test_group && $("testGroup").value !== fields.test_group) {
+    $("testGroup").value = fields.test_group;
+    renderTests();
+  }
+  if (fields.test_id) $("testId").value = fields.test_id;
+  if (fields.session_number) {
+    $("sessionNumberManual").checked = true;
+    $("sessionNumber").disabled = false;
+    $("sessionNumber").value = fields.session_number;
+  }
+  if (fields.repeat_number) $("repeatNumber").value = fields.repeat_number;
+  if (fields.siren_type !== undefined) $("sirenType").value = fields.siren_type || "";
+  $("sessionFormState").textContent = "Синхронизация EGO: задано";
+}
+
+function renderEgoSync(sync = {}) {
+  const enabled = sync.enabled !== false;
+  $("egoSyncEnabled").checked = enabled;
+  const status = sync.status || {};
+  const ok = Boolean(status.available);
+  $("egoSyncStatus").textContent = enabled
+    ? (ok ? `EGO доступен, ${status.status || "связь есть"}` : `EGO недоступен: ${status.last_error || "нет связи"}`)
+    : "Синхронизация с EGO выключена";
+  applyEgoSyncFields(sync);
+}
+
+async function postEgoSyncLocalFields() {
+  try {
+    await jsonPost("/api/ego-sync/local", sessionPayload());
+  } catch (_) {
+  }
+}
+
+async function saveEgoSyncEnabled() {
+  try {
+    const sync = await jsonPost("/api/ego-sync/config", { enabled: $("egoSyncEnabled").checked });
+    renderEgoSync(sync);
+  } catch (error) {
+    $("egoSyncStatus").textContent = error.message;
+  }
+}
+
 async function startSession() {
   if (!$("sessionNumber").value.trim()) {
     $("sessionFormState").textContent = "Укажите номер сессии";
@@ -185,6 +234,8 @@ async function updateState(force = false) {
     $("activeNmea").textContent = `${state.interfaces.nmea.valid} / err ${state.interfaces.nmea.errors}`;
     updateSessionNumberLock();
     renderInterfacesState(state.interfaces);
+    renderEgoSync(state.interfaces.ego_sync || {});
+    await postEgoSyncLocalFields();
   } catch (error) {
     $("pageState").textContent = error.message;
   }
@@ -469,6 +520,7 @@ $("sessionNumberManual").onchange = () => {
 };
 $("start").onclick = startSession;
 $("stop").onclick = stopSession;
+$("egoSyncEnabled").onchange = saveEgoSyncEnabled;
 $("sessionTriggerOn").onclick = () => simulate(true);
 $("sessionTriggerOff").onclick = () => simulate(false);
 $("logsRefresh").onclick = () => updateLogs(true);

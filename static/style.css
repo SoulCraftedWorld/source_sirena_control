@@ -22,6 +22,8 @@ input[type=checkbox]{width:auto;min-height:0;accent-color:#43a876}
 .record-indicator{display:flex;gap:9px;align-items:center;padding:12px;background:#202427;border-radius:5px}.record-indicator i,.trigger-display i{width:13px;height:13px;border-radius:50%;background:#5b6267}.record-indicator.active i,.trigger-display.active i{background:#e94f49;box-shadow:0 0 9px #e94f49}
 #timer{margin:20px 0;font:600 36px Consolas,monospace}.actions button{flex:1}
 .simulation-actions{margin-top:9px}
+.ego-sync-option{margin-top:12px}
+#egoSyncStatus{margin-top:5px}
 dl{margin:16px 0 0}dl div{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px solid #30353a}dt{color:#929aa0}dd{margin:0;overflow-wrap:anywhere}
 .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:16px;margin-bottom:18px}fieldset{padding:12px;border:1px solid #3a4044;border-radius:5px}legend{padding:0 6px;font-weight:600}.settings-grid label{grid-template-columns:minmax(150px,1fr) minmax(130px,1.1fr);align-items:center;min-height:39px}
 .fieldset-actions{display:flex;align-items:center;gap:8px;margin:8px 0 10px}.muted{color:#98a1a8;font-size:13px}

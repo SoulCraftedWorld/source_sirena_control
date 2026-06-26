@@ -50,5 +50,11 @@
     "connect_timeout_s": 3.0,
     "retry_window_s": 20.0,
     "retry_interval_s": 2.0
+  },
+  "ego_sync": {
+    "enabled": true,
+    "web_port": 80,
+    "poll_interval_s": 1.0,
+    "timeout_s": 2.0
   }
 }

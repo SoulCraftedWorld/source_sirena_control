@@ -17,7 +17,9 @@ import socket
 import threading
 import time
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 import zlib
 
 from ego_log import FRAME_HEADER, FRAME_MAGIC, GPS_FIX, TYPE_GPS_FIX, EgoLogWriter
@@ -435,6 +437,81 @@ class LocalPcSender:
         self.worker.join(timeout=2.0)
 
 
+class EgoSyncClient:
+    def __init__(self, app: "SourceApplication") -> None:
+        self.app = app
+        self.stop_event = threading.Event()
+        self.worker = threading.Thread(
+            target=self._run, name="source-ego-sync", daemon=True
+        )
+        self.worker.start()
+
+    def _settings(self) -> dict[str, Any]:
+        return dict(self.app.config.get("ego_sync", {}))
+
+    def _url(self) -> str:
+        settings = self._settings()
+        base_url = str(settings.get("base_url") or "").strip().rstrip("/")
+        if base_url:
+            return base_url
+        host = str(
+            settings.get("host")
+            or self.app.config.get("localpc", {}).get("host")
+            or ""
+        ).strip()
+        if not host:
+            return ""
+        if host.startswith("http://") or host.startswith("https://"):
+            return host.rstrip("/")
+        port = int(settings.get("web_port") or 80)
+        suffix = "" if port == 80 else f":{port}"
+        return f"http://{host}{suffix}"
+
+    @staticmethod
+    def _post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _run(self) -> None:
+        while not self.stop_event.is_set():
+            settings = self._settings()
+            timeout = float(settings.get("timeout_s") or 2.0)
+            interval = float(settings.get("poll_interval_s") or 1.0)
+            base_url = self._url()
+            try:
+                if not base_url:
+                    raise RuntimeError("EGO host is not configured")
+                response = self._post_json(
+                    f"{base_url}/api/source-sync/poll",
+                    self.app.ego_sync_poll_payload(),
+                    timeout,
+                )
+                desired = response.get("desired")
+                if desired and self.app.ego_sync_enabled():
+                    self.app.apply_ego_sync(desired)
+                self.app.update_ego_sync_status(
+                    available=True,
+                    error="",
+                    version=int(response.get("version") or 0),
+                )
+            except (OSError, HTTPError, URLError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                self.app.update_ego_sync_status(
+                    available=False, error=str(exc), version=None
+                )
+            self.stop_event.wait(max(0.2, interval))
+
+    def close(self) -> None:
+        self.stop_event.set()
+        self.worker.join(timeout=2.0)
+
+
 class SourceApplication:
     def __init__(self, config_path: Path) -> None:
         self.config_path = config_path
@@ -445,9 +522,19 @@ class SourceApplication:
         self.writer: EgoLogWriter | None = None
         self.active: dict[str, Any] | None = None
         self.audio: AudioCapture | None = None
+        self.ego_sync_local_fields: dict[str, Any] = {}
+        self.ego_sync_applied_fields: dict[str, Any] = {}
+        self.ego_sync_applied_version = 0
+        self.ego_sync_status: dict[str, Any] = {
+            "available": False,
+            "last_ok_utc": "",
+            "last_error": "",
+            "status": "ожидание связи с EGO",
+        }
         self.history = self._load_history()
         self.uploader = S3Uploader(self)
         self.localpc = LocalPcSender(self)
+        self.ego_sync = EgoSyncClient(self)
         self.nmea: NmeaService
         self.trigger: TriggerService
         self._start_inputs()
@@ -499,6 +586,102 @@ class SourceApplication:
 
     def save_config(self) -> None:
         atomic_json(self.config_path, self.config)
+
+    @staticmethod
+    def _sync_fields(raw: dict[str, Any]) -> dict[str, Any]:
+        def clean(key: str, limit: int = 96) -> str:
+            return str(raw.get(key, "") or "").strip()[:limit]
+
+        try:
+            repeat_number = int(raw.get("repeat_number") or 0)
+        except (TypeError, ValueError):
+            repeat_number = 0
+        return {
+            "session_number": clean("session_number", 24),
+            "repeat_number": repeat_number,
+            "test_group": clean("test_group", 32),
+            "test_id": clean("test_id", 32),
+            "test_name": clean("test_name", 96),
+            "siren_type": clean("siren_type", 48),
+        }
+
+    def ego_sync_enabled(self) -> bool:
+        return bool(self.config.get("ego_sync", {}).get("enabled", True))
+
+    def update_ego_sync_local_fields(self, raw: dict[str, Any]) -> dict[str, Any]:
+        fields = self._sync_fields(raw)
+        with self.lock:
+            self.ego_sync_local_fields = fields
+        return self.ego_sync_state()
+
+    def ego_sync_poll_payload(self) -> dict[str, Any]:
+        with self.lock:
+            local_fields = dict(self.ego_sync_local_fields)
+            applied_fields = dict(self.ego_sync_applied_fields)
+            siren_type = (
+                local_fields.get("siren_type")
+                or applied_fields.get("siren_type")
+                or ""
+            )
+            return {
+                "source_id": int(self.config["source_id"]),
+                "source_name": self.config.get("source_name", ""),
+                "sync_enabled": self.ego_sync_enabled(),
+                "siren_type": siren_type,
+                "version": self.ego_sync_applied_version,
+                "applied_version": self.ego_sync_applied_version,
+                "status": self.ego_sync_status.get("status", ""),
+            }
+
+    def apply_ego_sync(self, raw: dict[str, Any]) -> None:
+        fields = self._sync_fields(raw)
+        version = int(raw.get("version") or 0)
+        with self.lock:
+            if self.writer:
+                self.ego_sync_status.update(
+                    status="EGO sync received during recording; deferred"
+                )
+                return
+            self.ego_sync_applied_fields = fields
+            self.ego_sync_applied_version = version
+            if fields.get("session_number"):
+                self._save_counter(str(fields["session_number"]))
+            self.ego_sync_status.update(
+                status="задано",
+                last_applied_utc=utc_now(),
+            )
+
+    def update_ego_sync_status(
+        self, available: bool, error: str, version: int | None = None
+    ) -> None:
+        with self.lock:
+            self.ego_sync_status["available"] = available
+            self.ego_sync_status["last_error"] = error
+            if available:
+                self.ego_sync_status["last_ok_utc"] = utc_now()
+                if version is not None:
+                    self.ego_sync_status["ego_version"] = version
+                if self.ego_sync_status.get("status") in {"", "EGO недоступен"}:
+                    self.ego_sync_status["status"] = "связь есть"
+            else:
+                self.ego_sync_status["status"] = "EGO недоступен"
+
+    def set_ego_sync_enabled(self, enabled: bool) -> dict[str, Any]:
+        with self.lock:
+            self.config.setdefault("ego_sync", {})["enabled"] = bool(enabled)
+            self.save_config()
+        return self.ego_sync_state()
+
+    def ego_sync_state(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "enabled": self.ego_sync_enabled(),
+                "status": dict(self.ego_sync_status),
+                "local_fields": dict(self.ego_sync_local_fields),
+                "applied_fields": dict(self.ego_sync_applied_fields),
+                "applied_version": self.ego_sync_applied_version,
+                "settings": dict(self.config.get("ego_sync", {})),
+            }
 
     @property
     def logs_dir(self) -> Path:
@@ -677,6 +860,7 @@ class SourceApplication:
                 "siren_trigger": self.config["siren_trigger"],
                 "audio": self.config["audio"],
                 "localpc": self.config.get("localpc", {}),
+                "ego_sync": self.config.get("ego_sync", {}),
             },
             "nmea": self.nmea.status,
             "trigger": {
@@ -692,6 +876,7 @@ class SourceApplication:
                 "bytes": self.audio.bytes if self.audio else 0,
                 "error": self.audio.error if self.audio else "",
             },
+            "ego_sync": self.ego_sync_state(),
         }
 
     def save_interfaces(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -920,6 +1105,7 @@ class SourceApplication:
     def close(self) -> None:
         if self.writer:
             self.stop_session()
+        self.ego_sync.close()
         self.localpc.close()
         self._stop_inputs()
 
@@ -998,6 +1184,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.app.analyze_log(name))
             elif parsed.path == "/api/interfaces":
                 self._json(self.app.interfaces_state())
+            elif parsed.path == "/api/ego-sync/state":
+                self._json(self.app.ego_sync_state())
             elif parsed.path == "/api/audio/devices":
                 self._json(self.app.audio_devices())
             elif parsed.path == "/api/journal":
@@ -1045,6 +1233,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.app.set_logs_dir(str(self._body()["path"])))
             elif parsed.path == "/api/interfaces":
                 self._json(self.app.save_interfaces(self._body()))
+            elif parsed.path == "/api/ego-sync/local":
+                self._json(self.app.update_ego_sync_local_fields(self._body()))
+            elif parsed.path == "/api/ego-sync/config":
+                self._json(
+                    self.app.set_ego_sync_enabled(
+                        bool(self._body().get("enabled", True))
+                    )
+                )
             elif parsed.path == "/api/audio/devices":
                 self._json(self.app.audio_devices(self._body()))
             elif parsed.path == "/api/interfaces/simulate-trigger":
