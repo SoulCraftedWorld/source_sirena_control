@@ -9,6 +9,8 @@ let nextSessionNumber = "1";
 let sessionNumberManual = false;
 let currentSessionRunning = false;
 let lastAppliedEgoSyncVersion = 0;
+const LAST_TEST_GROUP_KEY = "source_sirena.last_test_group";
+const LAST_TEST_ID_KEY = "source_sirena.last_test_id";
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -83,16 +85,27 @@ function setToggleButtonState(onButton, offButton, active) {
 }
 
 function renderCatalog() {
+  const previousGroup = $("testGroup").value || localStorage.getItem(LAST_TEST_GROUP_KEY) || "";
+  const previousTest = $("testId").value || localStorage.getItem(LAST_TEST_ID_KEY) || "";
   const groups = [...new Set(catalog.map((item) => item.group))];
   $("testGroup").innerHTML = groups.map((group) => `<option>${group}</option>`).join("");
-  renderTests();
+  if (groups.includes(previousGroup)) $("testGroup").value = previousGroup;
+  renderTests(previousTest);
 }
 
-function renderTests() {
+function rememberSelectedTest() {
+  localStorage.setItem(LAST_TEST_GROUP_KEY, $("testGroup").value || "");
+  localStorage.setItem(LAST_TEST_ID_KEY, $("testId").value || "");
+}
+
+function renderTests(preferredTestId = "") {
   const tests = catalog.filter((item) => item.group === $("testGroup").value);
+  const previousTest = preferredTestId || $("testId").value || localStorage.getItem(LAST_TEST_ID_KEY) || "";
   $("testId").innerHTML = tests
     .map((item) => `<option value="${item.id}">${item.id} - ${item.name}</option>`)
     .join("");
+  if (tests.some((item) => item.id === previousTest)) $("testId").value = previousTest;
+  rememberSelectedTest();
 }
 
 function updateSessionNumberLock() {
@@ -142,6 +155,7 @@ function applyEgoSyncFields(sync = {}) {
     renderTests();
   }
   if (fields.test_id) $("testId").value = fields.test_id;
+  rememberSelectedTest();
   if (fields.session_number) {
     $("sessionNumberManual").checked = true;
     $("sessionNumber").disabled = false;
@@ -191,6 +205,7 @@ async function startSession() {
   }
   try {
     $("sessionFormState").textContent = "Запуск...";
+    rememberSelectedTest();
     await jsonPost("/api/sessions/start", sessionPayload());
     await updateState(true);
   } catch (error) {
@@ -201,6 +216,7 @@ async function startSession() {
 async function stopSession() {
   try {
     $("sessionFormState").textContent = "Остановка...";
+    rememberSelectedTest();
     await jsonPost("/api/sessions/stop");
     await loadCatalog();
     await updateState(true);
@@ -522,7 +538,8 @@ document.querySelectorAll(".tab").forEach((tab) => {
   };
 });
 
-$("testGroup").onchange = renderTests;
+$("testGroup").onchange = () => renderTests();
+$("testId").onchange = rememberSelectedTest;
 $("sessionNumberManual").onchange = () => {
   updateSessionNumberLock();
   if (sessionNumberManual) $("sessionNumber").focus();
