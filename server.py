@@ -660,9 +660,12 @@ class SourceApplication:
         with self.lock:
             local_fields = dict(self.ego_sync_local_fields)
             applied_fields = dict(self.ego_sync_applied_fields)
+            fields = {
+                **applied_fields,
+                **{key: value for key, value in local_fields.items() if value not in ("", 0)},
+            }
             siren_type = (
-                local_fields.get("siren_type")
-                or applied_fields.get("siren_type")
+                fields.get("siren_type")
                 or ""
             )
             return {
@@ -670,6 +673,11 @@ class SourceApplication:
                 "source_name": self.config.get("source_name", ""),
                 "sync_enabled": self.ego_sync_enabled(),
                 "start_with_ego": self.ego_start_with_ego_enabled(),
+                "session_number": fields.get("session_number", ""),
+                "repeat_number": int(fields.get("repeat_number") or 0),
+                "test_group": fields.get("test_group", ""),
+                "test_id": fields.get("test_id", ""),
+                "test_name": fields.get("test_name", ""),
                 "siren_type": siren_type,
                 "version": self.ego_sync_applied_version,
                 "applied_version": self.ego_sync_applied_version,
