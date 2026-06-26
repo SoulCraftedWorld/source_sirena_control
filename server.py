@@ -673,6 +673,7 @@ class SourceApplication:
                 "source_name": self.config.get("source_name", ""),
                 "sync_enabled": self.ego_sync_enabled(),
                 "start_with_ego": self.ego_start_with_ego_enabled(),
+                "recording": bool(self.writer),
                 "session_number": fields.get("session_number", ""),
                 "repeat_number": int(fields.get("repeat_number") or 0),
                 "test_group": fields.get("test_group", ""),
