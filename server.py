@@ -483,7 +483,7 @@ class EgoSyncClient:
         while not self.stop_event.is_set():
             settings = self._settings()
             timeout = float(settings.get("timeout_s") or 2.0)
-            interval = float(settings.get("poll_interval_s") or 1.0)
+            interval = min(1.0, float(settings.get("poll_interval_s") or 1.0))
             base_url = self._url()
             try:
                 if not base_url:
@@ -608,6 +608,9 @@ class SourceApplication:
     def ego_sync_enabled(self) -> bool:
         return bool(self.config.get("ego_sync", {}).get("enabled", True))
 
+    def ego_start_with_ego_enabled(self) -> bool:
+        return bool(self.config.get("ego_sync", {}).get("start_with_ego", True))
+
     def update_ego_sync_local_fields(self, raw: dict[str, Any]) -> dict[str, Any]:
         fields = self._sync_fields(raw)
         with self.lock:
@@ -627,6 +630,7 @@ class SourceApplication:
                 "source_id": int(self.config["source_id"]),
                 "source_name": self.config.get("source_name", ""),
                 "sync_enabled": self.ego_sync_enabled(),
+                "start_with_ego": self.ego_start_with_ego_enabled(),
                 "siren_type": siren_type,
                 "version": self.ego_sync_applied_version,
                 "applied_version": self.ego_sync_applied_version,
@@ -636,8 +640,12 @@ class SourceApplication:
     def apply_ego_sync(self, raw: dict[str, Any]) -> None:
         fields = self._sync_fields(raw)
         version = int(raw.get("version") or 0)
+        command = str(raw.get("command") or "set").strip().lower()
+        should_start = False
+        should_stop = False
         with self.lock:
-            if self.writer:
+            recording = bool(self.writer)
+            if recording and command != "stop":
                 self.ego_sync_status.update(
                     status="EGO sync received during recording; deferred"
                 )
@@ -646,10 +654,38 @@ class SourceApplication:
             self.ego_sync_applied_version = version
             if fields.get("session_number"):
                 self._save_counter(str(fields["session_number"]))
+            should_start = (
+                command == "start"
+                and self.ego_sync_enabled()
+                and self.ego_start_with_ego_enabled()
+                and not recording
+            )
+            should_stop = command == "stop" and recording
             self.ego_sync_status.update(
                 status="задано",
                 last_applied_utc=utc_now(),
             )
+
+        if should_start:
+            try:
+                self.start_session(fields)
+                with self.lock:
+                    self.ego_sync_status["status"] = "запущено по EGO"
+            except Exception as exc:
+                logging.exception("EGO synchronized start failed")
+                with self.lock:
+                    self.ego_sync_status["status"] = "ошибка запуска по EGO"
+                    self.ego_sync_status["last_error"] = str(exc)
+        elif should_stop:
+            try:
+                self.stop_session()
+                with self.lock:
+                    self.ego_sync_status["status"] = "остановлено по EGO"
+            except Exception as exc:
+                logging.exception("EGO synchronized stop failed")
+                with self.lock:
+                    self.ego_sync_status["status"] = "ошибка остановки по EGO"
+                    self.ego_sync_status["last_error"] = str(exc)
 
     def update_ego_sync_status(
         self, available: bool, error: str, version: int | None = None
@@ -672,10 +708,21 @@ class SourceApplication:
             self.save_config()
         return self.ego_sync_state()
 
+    def set_ego_sync_config(self, raw: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            config = self.config.setdefault("ego_sync", {})
+            if "enabled" in raw:
+                config["enabled"] = bool(raw.get("enabled"))
+            if "start_with_ego" in raw:
+                config["start_with_ego"] = bool(raw.get("start_with_ego"))
+            self.save_config()
+        return self.ego_sync_state()
+
     def ego_sync_state(self) -> dict[str, Any]:
         with self.lock:
             return {
                 "enabled": self.ego_sync_enabled(),
+                "start_with_ego": self.ego_start_with_ego_enabled(),
                 "status": dict(self.ego_sync_status),
                 "local_fields": dict(self.ego_sync_local_fields),
                 "applied_fields": dict(self.ego_sync_applied_fields),
@@ -1236,11 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/ego-sync/local":
                 self._json(self.app.update_ego_sync_local_fields(self._body()))
             elif parsed.path == "/api/ego-sync/config":
-                self._json(
-                    self.app.set_ego_sync_enabled(
-                        bool(self._body().get("enabled", True))
-                    )
-                )
+                self._json(self.app.set_ego_sync_config(self._body()))
             elif parsed.path == "/api/audio/devices":
                 self._json(self.app.audio_devices(self._body()))
             elif parsed.path == "/api/interfaces/simulate-trigger":

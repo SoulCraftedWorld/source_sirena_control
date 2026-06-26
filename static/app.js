@@ -155,6 +155,7 @@ function applyEgoSyncFields(sync = {}) {
 function renderEgoSync(sync = {}) {
   const enabled = sync.enabled !== false;
   $("egoSyncEnabled").checked = enabled;
+  $("egoStartWithEgo").checked = sync.start_with_ego !== false;
   const status = sync.status || {};
   const ok = Boolean(status.available);
   $("egoSyncStatus").textContent = enabled
@@ -172,7 +173,10 @@ async function postEgoSyncLocalFields() {
 
 async function saveEgoSyncEnabled() {
   try {
-    const sync = await jsonPost("/api/ego-sync/config", { enabled: $("egoSyncEnabled").checked });
+    const sync = await jsonPost("/api/ego-sync/config", {
+      enabled: $("egoSyncEnabled").checked,
+      start_with_ego: $("egoStartWithEgo").checked,
+    });
     renderEgoSync(sync);
   } catch (error) {
     $("egoSyncStatus").textContent = error.message;
@@ -521,6 +525,7 @@ $("sessionNumberManual").onchange = () => {
 $("start").onclick = startSession;
 $("stop").onclick = stopSession;
 $("egoSyncEnabled").onchange = saveEgoSyncEnabled;
+$("egoStartWithEgo").onchange = saveEgoSyncEnabled;
 $("sessionTriggerOn").onclick = () => simulate(true);
 $("sessionTriggerOff").onclick = () => simulate(false);
 $("logsRefresh").onclick = () => updateLogs(true);
